@@ -69,8 +69,8 @@ Metrics:
   over individual outputs, in bins of 100 as in the official scorer; lower is
   better. The official code leaves its highest-confidence bin out of the sum; this
   metric keeps it, hence the distinct name.
-- ``calibration_error_stated`` and ``confidence_stated_rate``, in the ``v2`` variants
-  (``hle:text:verified:v2``) in place of ``calibration_error_all_bins``: the same RMS
+- ``calibration_error_stated`` and ``confidence_stated_rate``, in the ``v3`` variants
+  (``hle:text:verified:v3``) in place of ``calibration_error_all_bins``: the same RMS
   calibration error, over only the outputs whose response states a confidence, and the
   share of judged outputs that do. ``calibration_error_all_bins`` counts every output
   without one at 100%: a response cut off at the token limit, and a finished answer
@@ -311,8 +311,21 @@ class HLECalibrationErrorMetric(Metric):
         return "proportion"
 
 
-#: A confidence the model stated itself, as the system prompt asks ("Confidence: 85%").
-_STATED_CONFIDENCE = re.compile(r"(?i)\bconfidence\b[^\n\d]{0,40}\d")
+# What a statistic is called, as opposed to how sure the model is.
+_STATISTICAL = r"(?:\s+(?:intervals?|bounds?|bands?|limits?|regions?)\b)"
+#: A confidence the model stated itself: the line the system prompt asks for, however it
+#: is laid out ("Confidence: 85%", "Confidence: {90%}", a heading with the number on the
+#: next line, "confidence level - 70", "Confidence is high (90%)"), or a sentence ("I am
+#: 85% confident", "70 percent confidence"). A statistical term such as "the 95%
+#: confidence interval is 3 to 5" is not one.
+_STATED_CONFIDENCE = re.compile(
+    r"(?i)"
+    rf"\bconfidence\b(?!{_STATISTICAL})(?:\s+(?:level|score))?\s*(?:is\s+)?"
+    r"(?:(?:very\s+)?(?:high|low|moderate|medium)\s*)?"
+    r"[\s*_:=\-–—({\[]*(?:of\s+|at\s+)?(?:about\s+|around\s+|approximately\s+|~\s*)?\d"
+    r"|\d+(?:\.\d+)?\s*(?:%|percent)\s+"
+    rf"(?:confident\b|sure\b|certain\b|confidence\b(?!{_STATISTICAL}|\s+levels?\b))"
+)
 
 
 def states_confidence(answer: str) -> bool:
@@ -342,7 +355,7 @@ def _stated_confidences(responses: Sequence[Response]) -> tuple[list[float], lis
 class HLEStatedCalibrationErrorMetric(Metric):
     """RMS calibration error over the outputs that stated a confidence; lower is better.
 
-    For the ``v2`` variants. ``calibration_error_all_bins`` gives 100% confidence to
+    For the ``v3`` variants. ``calibration_error_all_bins`` gives 100% confidence to
     every output that stated none: a response cut off at the token limit, and a finished
     answer without a confidence line, which the judge prompt says to read as 100. Those
     are not confidences the model expressed, and where they are common the metric
@@ -423,8 +436,8 @@ HLE_METRICS = (
         for answer_type, suffix in HLE_ANSWER_TYPES.items()
     ),
 )
-# The ``v2`` metrics: calibration read only from the outputs that stated a confidence.
-HLE_METRICS_V2 = tuple(
+# The ``v3`` metrics: calibration read only from the outputs that stated a confidence.
+HLE_METRICS_V3 = tuple(
     HLEStatedCalibrationErrorMetric() if isinstance(metric, HLECalibrationErrorMetric) else metric
     for metric in HLE_METRICS
 ) + (HLEConfidenceStatedRateMetric(),)
@@ -500,7 +513,7 @@ class _HLE(JudgedTask):
             )
 
         if any(isinstance(m, HLEStatedCalibrationErrorMetric) for m in self.config.metrics):
-            # For the ``v2`` metrics: False when the confidence below is the 100% that a
+            # For the ``v3`` metrics: False when the confidence below is the 100% that a
             # missing one is read as.
             judge_result["confidence_stated"] = not no_final_response and states_confidence(answer)
         judge_result.update(
@@ -543,15 +556,26 @@ class HLETextVerified(_HLE):
         return super().process_doc(record, index)
 
 
-# ``v2`` (``hle:text:verified:v2``): calibration is read from the outputs that stated a
-# confidence (``calibration_error_stated``, with ``confidence_stated_rate``), and a
-# reasoning trace that never closed is no response whatever stopped it, including a
-# trace the chat template opened. Accuracy is otherwise scored as in the original specs.
+# ``v2`` (``hle:text:verified:v2``): a reasoning trace that never closed is no response
+# whatever stopped it, including a trace the chat template opened that ended at end of
+# turn. The original specs find an unfinished response by its finish reason alone, and
+# so send such a trace to the judge. Metrics are unchanged.
 for _hle_task in ("hle:text", "hle:text:verified"):
     register_variant(
         _hle_task,
         "v2",
-        metrics=HLE_METRICS_V2,
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
+
+# ``v3`` (``hle:text:verified:v3``): ``v2``, with calibration read from the outputs that
+# stated a confidence (``calibration_error_stated``, with ``confidence_stated_rate``) in
+# place of ``calibration_error_all_bins``. Accuracy is scored as in ``v2``.
+for _hle_task in ("hle:text", "hle:text:verified"):
+    register_variant(
+        _hle_task,
+        "v3",
+        metrics=HLE_METRICS_V3,
         strip_unclosed_thinking=True,
         thinking_prefilled="auto",
     )

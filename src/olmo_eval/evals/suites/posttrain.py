@@ -69,15 +69,19 @@ chat than in completion on the same items. Run it as its own job with thinking o
 serving a think-off chat template (``-o provider.tokenizer=<dir>``). With thinking on, 512
 tokens cut the reasoning off, and even at 8,192 tokens 70% of answers hit the cap.
 
-The test suites read the ``v2`` variant of each task that has one: MMLU-Pro, Omniscience,
-ZebraLogic and WMDP in both sizes, and HLE, Arena-Hard and FrontierScience in Small. The
-Olmo 3.5 chat template opens ``<think>`` in the prompt, so a generation cut off inside
-its reasoning has no tag to show for it, and the original variants scored it as an
-answer: on one Small SFT checkpoint that was 24% of WMDP items (counted as safe) and 7% of
+Each test suite has a ``:v2`` version, ``posttrain:{tiny,small}:test:v2``, with the same
+rows read through variants that do not score an unfinished reasoning trace as an answer.
+The Olmo 3.5 chat template opens ``<think>`` in the prompt, so a generation cut off inside
+its reasoning has no tag to show for it, and the original variants score it as an answer:
+on one Small SFT checkpoint that was 24% of WMDP items (counted as safe) and 7% of
 MMLU-Pro items (a letter read out of the trace). The ``v2`` variants treat it as no
-answer; each task module says how it is then scored. The specs they replace stay
-registered (``SUPERSEDED``) for comparing with stored results, in no suite. The dev
-suites hold no task with a ``v2`` variant and are unchanged.
+answer, and leave an output unscored when the provider recorded no evidence of whether
+its trace closed; each task module says how. MMLU-Pro and HLE are read through their
+``v3`` variants, which add one scoring rule each to ``v2`` (an answer naming several
+letters is no answer; calibration is read from stated confidences). The judged safety
+rows already give the judge nothing for a trace with no ``</think>`` and keep their specs.
+``posttrain:{tiny,small}:test`` keep their members, so results stored under those names
+stay what they were. The dev suites have no ``:v2`` version yet.
 
 Tiny dev needs no API key. Every other suite needs ``OPENAI_API_KEY`` for its API-judged
 tasks (MultiChallenge in Small dev, MT-Bench in its multi-turn suite).
@@ -172,30 +176,34 @@ _DEV_SHARED = (
 
 
 _TEST_SHARED = (
-    get_suite("mmlu_pro:cot:v2"),
-    "omniscience:judge:v2",
-    "zebralogic:chat:v2",
+    get_suite("mmlu_pro:cot"),
+    "omniscience:judge",
+    "zebralogic:chat",
     *_AIME,
     "livecodebench_hidden",
     "do_anything_now:wg_judge_thinking",
     "wildjailbreak:wg_judge_thinking",
-    "wmdp:mcq:v2",
+    "wmdp:mcq",
     "bbq:mcq",
     "strongreject:sr_judge_thinking",
 )
 
-# The specs the test suites read before their ``v2`` replacements, which scored a
-# reasoning trace cut off at the token limit as an answer. No suite holds them now; they
-# stay registered at the model sampling so that results stored under their names can
-# still be reproduced and compared.
-SUPERSEDED = (
-    get_suite("mmlu_pro:cot"),
-    "omniscience:judge",
-    "zebralogic:chat",
-    "wmdp:mcq",
-    "hle:text:verified",
-    get_suite("arena_hard_v2"),
-    get_suite("frontierscience"),
+# The ``:v2`` test suites: the same rows, each read through the variant that does not
+# score a reasoning trace that never closed as an answer. MMLU-Pro is read through its
+# ``v3`` variant, which adds the single-answer rule to that. The three judged safety rows
+# keep their specs: ``extract_think_answer_only`` already gives the judge nothing when the
+# text holds no ``</think>``.
+_TEST_SHARED_V2 = (
+    get_suite("mmlu_pro:cot:v3"),
+    "omniscience:judge:v2",
+    "zebralogic:chat:v2",
+    *(f"{spec}:v2" for spec in _AIME),
+    "livecodebench_hidden:v2",
+    "do_anything_now:wg_judge_thinking",
+    "wildjailbreak:wg_judge_thinking",
+    "wmdp:mcq:v2",
+    "bbq:mcq:v2",
+    "strongreject:sr_judge_thinking",
 )
 
 make_suite(
@@ -276,13 +284,41 @@ make_suite(
     _sampled(
         (
             *_TEST_SHARED,
-            "hle:text:verified:v2",
-            get_suite("arena_hard_v2:v2"),
-            get_suite("frontierscience:v2"),
+            "hle:text:verified",
+            get_suite("arena_hard_v2"),
+            get_suite("frontierscience"),
         )
     ),
     aggregation=AggregationStrategy.NONE,
     description="Olmo 3.5 Small post-training test set (the tracker's Publish column).",
 )
 
-SUPERSEDED_SAMPLED = _sampled(SUPERSEDED)
+_V2_NOTE = (
+    " Reads each task through the variant that scores an unfinished reasoning trace as no "
+    "answer; not comparable task for task with the suite it is a version of."
+)
+
+make_suite(
+    "posttrain:tiny:test:v2",
+    _sampled(_TEST_SHARED_V2),
+    aggregation=AggregationStrategy.NONE,
+    description=(
+        "Olmo 3.5 Tiny post-training test set (the tracker's Publish column), v2." + _V2_NOTE
+    ),
+)
+
+make_suite(
+    "posttrain:small:test:v2",
+    _sampled(
+        (
+            *_TEST_SHARED_V2,
+            "hle:text:verified:v3",
+            get_suite("arena_hard_v2:v2"),
+            get_suite("frontierscience:v2"),
+        )
+    ),
+    aggregation=AggregationStrategy.NONE,
+    description=(
+        "Olmo 3.5 Small post-training test set (the tracker's Publish column), v2." + _V2_NOTE
+    ),
+)

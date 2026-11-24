@@ -250,20 +250,19 @@ class ContextFit:
     max_prompt_tokens: int | None = None
 
 
-#: ``LMOutput.metadata`` key a provider sets to True when the prompt it rendered ends by
-#: opening a ``<think>`` trace, so the generation starts inside the trace and carries no
-#: opening tag. Absent when the prompt does not, or when the provider cannot tell.
+#: ``LMOutput.metadata`` key saying whether the prompt a provider rendered ends by opening
+#: a ``<think>`` trace, so that the generation starts inside the trace and carries no
+#: opening tag. True when it does; None when the provider tried to find out and could
+#: not; absent when it does not, or for a provider that does not look.
 PROMPT_OPENS_THINK_KEY = "prompt_opens_think"
 
-#: ``LMOutput.metadata`` key a server provider sets to True when the server returned the
-#: reasoning trace in its own field, so the text is the answer that followed a closed trace.
-REASONING_SEPARATED_KEY = "reasoning_separated"
-
-#: ``LMOutput.metadata`` key a provider sets to True when a closed trace may leave no
-#: ``</think>`` in the output text: a server may run a reasoning parser, and a decoder
-#: drops the tag when the tokenizer marks it special. A missing ``</think>`` then says
-#: nothing about whether the trace closed.
-THINK_CLOSE_HIDDEN_KEY = "think_close_hidden"
+#: ``LMOutput.metadata`` key saying whether a trace the prompt opened was closed, from
+#: evidence the provider holds: a ``</think>`` in the text, or its token id among the
+#: generated ids. True or False when the provider has such evidence, absent when it has
+#: none. A missing ``</think>`` in the text is not evidence by itself: a decoder drops
+#: the tag when the tokenizer marks it special, and a server-side reasoning parser
+#: removes it. Set only beside ``PROMPT_OPENS_THINK_KEY``.
+THINK_CLOSED_KEY = "think_closed"
 
 #: ``LMOutput.metadata`` key holding how many tokens a provider cut from a request's
 #: ``ContextFit`` text before generating; absent when nothing was cut.

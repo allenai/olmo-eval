@@ -625,10 +625,12 @@ Generation diagnostics count outputs, including each sample of an instance.
 `cap_hit` counts known `length` finish reasons and is a lower bound when
 `finish_reason_unknown` is nonzero. `unclosed_think` counts reasoning traces that
 never closed in the original generation: a `<think>` tag without a closing tag, or,
-when the chat template itself opens the trace, a generation with no `</think>`. The
-SGLang and vLLM providers record such a prompt on each output
-(`prompt_opens_think` in the predictions file); runs saved before they did report
-only emitted tags. `empty` counts empty
+when the chat template itself opens the trace, a generation the provider has evidence
+never produced `</think>`. The SGLang and vLLM providers record on each output whether
+the prompt opened a trace (`prompt_opens_think`) and whether it closed (`think_closed`,
+from the text or the generated token ids; absent when the provider has no evidence).
+Both are saved in the predictions file. Outputs without evidence, and runs saved before
+the providers recorded it, count only emitted tags. `empty` counts empty
 scoring text and excludes tool calls. Tasks that strip or transform text inside
 extraction, without changing `LMOutput.text`, set
 `output.metadata[SCORING_TEXT_EMPTY_KEY]` from that scoring text before parsing;
@@ -1118,13 +1120,17 @@ chat than in completion on the same items. Run it as its own job with thinking o
 serving a think-off chat template (`-o provider.tokenizer=<dir>`). With thinking on, 512
 tokens cut the reasoning off, and even at 8,192 tokens 70% of answers hit the cap.
 
-The test suites read the `v2` variant of each task that has one (MMLU-Pro, Omniscience,
-ZebraLogic and WMDP, and in Small also HLE, Arena-Hard and FrontierScience), for example
-`wmdp:mcq_v2_t10_32k`. The Olmo 3.5 chat template opens `<think>` in the prompt, so a
-generation cut off inside its reasoning carries no tag, and the original variants scored
-it as an answer. The `v2` variants treat it as no answer. Results from before this change
-were scored with the originals (`wmdp:mcq_t10_32k` and so on), which stay registered; see
-the [result compatibility log](docs/result-compatibility.md).
+Each test suite has a `:v2` version, `posttrain:tiny:test:v2` and
+`posttrain:small:test:v2`, with the same rows read through variants that do not score an
+unfinished reasoning trace as an answer (for example `wmdp:mcq_v2_t10_32k`). The Olmo 3.5
+chat template opens `<think>` in the prompt, so a generation cut off inside its reasoning
+carries no tag, and the original variants score it as an answer. MMLU-Pro and HLE are
+read through their `v3` variants, which also reject an answer naming several letters and
+read calibration only from stated confidences. Prefer the `:v2` suites for new reads;
+`posttrain:{tiny,small}:test` keep their members, so earlier results stay comparable
+under those names. A `:v2` suite needs a provider that records whether each trace closed
+(SGLang, inline vLLM, or a vLLM server that returns token ids or logprobs): an output
+with no such evidence is left unscored.
 
 The suites name no provider, but the engine is part of what a score measures: compare
 scores only between runs on the same provider, and record it with each run. When the rest

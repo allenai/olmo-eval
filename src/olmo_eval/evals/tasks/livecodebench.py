@@ -428,6 +428,17 @@ class LiveCodeBenchHidden(LiveCodeBench):
 
 
 for _task_name in ("livecodebench", "livecodebench_hidden"):
+    # ``livecodebench_hidden:v2``, also stacked on another variant. A reasoning trace
+    # that never closed is no answer, including a trace the chat template opened:
+    # without this, the last code block drafted inside a trace cut off at the token
+    # limit is run as the solution. A finished response is read as before.
+    register_variant(
+        _task_name,
+        "v2",
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
+
     # Mirrors oe-eval's ``::olmo3:adapt`` prompt, which asks for the reasoning
     # inside literal <think> tags.
     register_variant(_task_name, "think_tags", formatter=THINK_TAG_FORMATTER)

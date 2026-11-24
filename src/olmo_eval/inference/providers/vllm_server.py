@@ -14,8 +14,7 @@ from olmo_eval.common.logging import get_logger
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
     PROMPT_OPENS_THINK_KEY,
-    REASONING_SEPARATED_KEY,
-    THINK_CLOSE_HIDDEN_KEY,
+    THINK_CLOSED_KEY,
     LMOutput,
     LMRequest,
     LogProbEntry,
@@ -30,7 +29,7 @@ from olmo_eval.inference.errors import (
     is_context_overflow,
 )
 from olmo_eval.inference.hf_cache import refresh_hf_cache
-from olmo_eval.inference.request_utils import prompt_opens_think
+from olmo_eval.inference.request_utils import THINK_CLOSE, prompt_opens_think
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 from olmo_eval.inference.utils import run_async
 
@@ -139,14 +138,61 @@ class TokenizerBosOverride:
         return getattr(self._tokenizer, name)
 
 
-def _message_reasoning(message: Any) -> str:
-    """The reasoning trace a server returned apart from a chat message's content, or ""."""
-    extra = getattr(message, "model_extra", None) or {}
-    for field in ("reasoning_content", "reasoning"):
-        value = getattr(message, field, None) or extra.get(field)
-        if isinstance(value, str) and value:
-            return value
-    return ""
+def _contains(sequence: Sequence[int], run: Sequence[int]) -> bool:
+    """Whether ``run`` occurs in ``sequence`` as a contiguous run."""
+    width = len(run)
+    return any(
+        list(sequence[start : start + width]) == list(run)
+        for start in range(len(sequence) - width + 1)
+    )
+
+
+def server_think_closed(
+    text: str,
+    *,
+    token_ids: Sequence[int] | None,
+    token_strings: Sequence[str] | None,
+    close_ids: Sequence[int] | None,
+) -> bool | None:
+    """Whether a server generation that started inside a trace closed it; None if unshown.
+
+    A reasoning parser removes ``</think>`` from the returned text, and a decoder drops
+    a tag the tokenizer marks special, so the text alone can only show that the trace
+    closed. The rest comes from what the server returned for this choice:
+
+    - its generated token ids, when the server sent them, searched for the ids of
+      ``</think>`` (``close_ids``);
+    - otherwise its logprob token strings joined together. Finding the tag there shows
+      the trace closed. Not finding it shows the trace stayed open only when the tag is
+      ordinary text spanning several tokens, whose pieces always appear; a single-token
+      tag can be decoded to nothing.
+
+    Nothing is read from the finish reason or from a separate reasoning field: a trace
+    can stop at end of turn unclosed, and a parser can return an unfinished trace as
+    reasoning.
+    """
+    if THINK_CLOSE in text:
+        return True
+    if token_ids is not None and close_ids:
+        return _contains(token_ids, close_ids)
+    if not token_strings or any(token.startswith("token_id:") for token in token_strings):
+        return None
+    if THINK_CLOSE in "".join(token_strings):
+        return True
+    if close_ids is not None and len(close_ids) > 1:
+        return False
+    return None
+
+
+def _choice_token_ids(choice: Any) -> list[int] | None:
+    """The generated token ids a server attached to a choice (``return_token_ids``)."""
+    extra = getattr(choice, "model_extra", None)
+    value = getattr(choice, "token_ids", None)
+    if not isinstance(value, list) and isinstance(extra, dict):
+        value = extra.get("token_ids")
+    if isinstance(value, list) and all(isinstance(item, int) for item in value):
+        return value
+    return None
 
 
 def _cut_at_stop_sequence(text: str, stop_sequences: list[str] | None) -> str:
@@ -369,8 +415,11 @@ class VLLMServerProvider(InferenceProvider):
         self._raw_http_client: httpx.AsyncClient | None = None
         self._openai_module: Any = None
         self._tokenizer: Any = None
-        # Whether the server's chat template opens a ``<think>`` trace; probed once.
-        self._chat_opens_think: bool | None = None
+        # What rendered prompts end with, by their last token ids, and the ids of
+        # ``</think>``; both are asked of the server and kept.
+        self._prompt_tail_opens_think: dict[tuple[int, ...], bool] = {}
+        self._think_close_ids: list[int] | None = None
+        self._think_close_ids_asked = False
         self._server: VLLMServerProcess | None = None  # type: ignore[possibly-unresolved-reference]
         if max_model_len is not None and max_model_len <= 0:
             raise ValueError("max_model_len must be positive when set")
@@ -901,14 +950,27 @@ class VLLMServerProvider(InferenceProvider):
         finish_reason: str | None = None,
         num_choices: int = 1,
         opens_think: bool = False,
+        close_ids: Sequence[int] | None = None,
     ) -> LMOutput:
         """Create a standardized LMOutput from completion response payloads."""
         metadata = self._completion_usage_metadata(usage, num_choices)
         metadata["finish_reason"] = finish_reason
         if opens_think:
-            # The server's decoder may drop a special ``</think>``; it cannot be asked.
+            # The generation starts inside the trace the prompt opened.
             metadata[PROMPT_OPENS_THINK_KEY] = True
-            metadata[THINK_CLOSE_HIDDEN_KEY] = True
+            payload_tokens = (
+                logprobs_payload.get("tokens")
+                if isinstance(logprobs_payload, dict)
+                else getattr(logprobs_payload, "tokens", None)
+            )
+            closed = server_think_closed(
+                text,
+                token_ids=None,
+                token_strings=payload_tokens if isinstance(payload_tokens, list) else None,
+                close_ids=close_ids,
+            )
+            if closed is not None:
+                metadata[THINK_CLOSED_KEY] = closed
         processed_text = self._postprocess_completion_text(text, stop_sequences)
 
         logprob_entries: list[LogProbEntry] | None = None
@@ -956,6 +1018,7 @@ class VLLMServerProvider(InferenceProvider):
         if stop_sequences:
             kwargs["stop"] = stop_sequences
         opens_think = prompt_opens_think(request.prompt or "")
+        close_ids = await self._get_think_close_ids() if opens_think else None
         truncate_prompt_tokens, truncation_side = self._get_prompt_truncation(params)
         if truncate_prompt_tokens is not None:
             extra_body["truncate_prompt_tokens"] = truncate_prompt_tokens
@@ -984,6 +1047,7 @@ class VLLMServerProvider(InferenceProvider):
                     stop_sequences=stop_sequences,
                     num_choices=len(choices),
                     opens_think=opens_think,
+                    close_ids=close_ids,
                 )
                 for choice in choices
             ]
@@ -1001,6 +1065,7 @@ class VLLMServerProvider(InferenceProvider):
                 stop_sequences=stop_sequences,
                 num_choices=len(response.choices),
                 opens_think=opens_think,
+                close_ids=close_ids,
             )
             for choice in response.choices
         ]
@@ -1044,29 +1109,35 @@ class VLLMServerProvider(InferenceProvider):
             payload["chat_template_kwargs"] = dict(self.chat_template_kwargs)
         return await self._count_tokens(payload)
 
-    async def _chat_prompt_opens_think(self) -> bool:
-        """Whether the server's chat template ends its generation prompt with ``<think>``.
+    async def _request_opens_think(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None
+    ) -> bool | None:
+        """Whether this request's rendered prompt ends by opening ``<think>``; None if unknown.
 
-        The server renders the template, so this asks it to tokenize one user turn and to
-        detokenize the end of the result. It is asked once: a template's generation
-        prompt does not depend on the conversation. A server that cannot answer counts
-        as not opening a trace, which leaves scoring as it was; that is logged as an
-        error, because tasks that read the record then miss unfinished traces.
+        The server renders the template, and what it renders can depend on the request
+        (a system turn, tools, earlier turns, template arguments). So the server is
+        asked to tokenize this request as it will be sent, and the last tokens are
+        detokenized: token strings are byte-level for some tokenizers (a newline is
+        "Ċ"), so the tail is read as the text the other providers render. Requests
+        whose prompts end in the same tokens share one detokenize call. That leaves one
+        tokenize call per request, on top of the one context fitting may make.
+
+        A server that cannot answer leaves the question open (None), which is recorded
+        on the output as such and logged once as an error.
         """
-        cached = getattr(self, "_chat_opens_think", None)
-        if cached is None:
-            cached = self._chat_opens_think = await self._probe_chat_prompt_opens_think()
-        return cached
-
-    async def _probe_chat_prompt_opens_think(self) -> bool:
         base_url = self.base_url.rstrip("/").removesuffix("/v1")
         payload: dict[str, Any] = {
             "model": self._request_model_name,
-            "messages": [{"role": "user", "content": "Hi"}],
+            "messages": messages,
             "add_generation_prompt": True,
         }
+        if tools:
+            payload["tools"] = tools
         if self.chat_template_kwargs:
             payload["chat_template_kwargs"] = dict(self.chat_template_kwargs)
+        cache: dict[tuple[int, ...], bool] = self.__dict__.setdefault(
+            "_prompt_tail_opens_think", {}
+        )
         try:
             async with httpx.AsyncClient(timeout=30.0) as http_client:
                 response = await http_client.post(f"{base_url}/tokenize", json=payload)
@@ -1074,25 +1145,54 @@ class VLLMServerProvider(InferenceProvider):
                 tokens = response.json()["tokens"]
                 if not isinstance(tokens, list) or not tokens:
                     raise ValueError("the server returned no prompt tokens")
-                # Token strings are byte-level for some tokenizers (a newline is "Ċ"), so
-                # the tail is detokenized to the text the other providers render.
+                tail = tuple(tokens[-16:])
+                if tail not in cache:
+                    response = await http_client.post(
+                        f"{base_url}/detokenize",
+                        json={"model": self._request_model_name, "tokens": list(tail)},
+                    )
+                    response.raise_for_status()
+                    text = response.json()["prompt"]
+                    if not isinstance(text, str):
+                        raise ValueError("the server returned no detokenized text")
+                    cache[tail] = prompt_opens_think(text)
+                return cache[tail]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
+            if not self.__dict__.get("_prompt_tail_error_logged"):
+                self._prompt_tail_error_logged = True
+                logger.error(
+                    "Could not read the end of the rendered chat prompt, so outputs are "
+                    "recorded with prompt_opens_think unknown and tasks with "
+                    "thinking_prefilled=auto will not score them: %s",
+                    exc,
+                )
+            return None
+
+    async def _get_think_close_ids(self) -> list[int] | None:
+        """The token ids the server's tokenizer gives ``</think>``, asked once; None if unknown."""
+        if self.__dict__.get("_think_close_ids_asked"):
+            return self.__dict__.get("_think_close_ids")
+        base_url = self.base_url.rstrip("/").removesuffix("/v1")
+        ids: list[int] | None = None
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as http_client:
                 response = await http_client.post(
-                    f"{base_url}/detokenize",
-                    json={"model": self._request_model_name, "tokens": tokens[-16:]},
+                    f"{base_url}/tokenize",
+                    json={
+                        "model": self._request_model_name,
+                        "prompt": THINK_CLOSE,
+                        "add_special_tokens": False,
+                    },
                 )
                 response.raise_for_status()
-                tail = response.json()["prompt"]
-                if not isinstance(tail, str):
-                    raise ValueError("the server returned no detokenized text")
+                tokens = response.json()["tokens"]
+                if isinstance(tokens, list) and tokens and all(isinstance(t, int) for t in tokens):
+                    ids = tokens
         except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
-            logger.error(
-                "Could not read the end of the rendered chat prompt, so outputs are not "
-                "marked as starting inside a reasoning trace and tasks with "
-                "thinking_prefilled=auto will read an unfinished trace as an answer: %s",
-                exc,
-            )
-            return False
-        return prompt_opens_think(tail)
+            logger.warning("Could not tokenize %s on the server: %s", THINK_CLOSE, exc)
+        self._think_close_ids = ids
+        self._think_close_ids_asked = True
+        return ids
 
     async def _count_tokens(self, payload: dict[str, Any]) -> int | None:
         """Return the token count the server's /tokenize endpoint gives a payload."""
@@ -1180,12 +1280,17 @@ class VLLMServerProvider(InferenceProvider):
         if extra_body:
             kwargs["extra_body"] = extra_body
 
+        # Whether this prompt opens a reasoning trace, and what would show that it closed.
+        opens_think = await self._request_opens_think(messages, tools)
+        close_ids = await self._get_think_close_ids() if opens_think else None
+        if close_ids is not None and len(close_ids) == 1:
+            # A single-token tag can decode to nothing, so ask for the generated ids.
+            kwargs.setdefault("extra_body", {})["return_token_ids"] = True
+
         response = await client.chat.completions.create(**kwargs)
 
         # Capture usage for accurate metrics
         usage = getattr(response, "usage", None)
-
-        opens_think = await self._chat_prompt_opens_think()
 
         outputs = []
         for choice in response.choices:
@@ -1206,13 +1311,8 @@ class VLLMServerProvider(InferenceProvider):
             metadata: dict[str, Any] = {"finish_reason": getattr(choice, "finish_reason", None)}
 
             metadata.update(self._completion_usage_metadata(usage, len(response.choices)))
-            if opens_think:
-                # The generation starts inside the trace. A server-side reasoning parser
-                # or special-token stripping can remove ``</think>`` from the content.
-                metadata[PROMPT_OPENS_THINK_KEY] = True
-                metadata[THINK_CLOSE_HIDDEN_KEY] = True
-                if _message_reasoning(choice.message):
-                    metadata[REASONING_SEPARATED_KEY] = True
+            if opens_think is None:
+                metadata[PROMPT_OPENS_THINK_KEY] = None
 
             logprobs_data = getattr(choice, "logprobs", None)
             if logprobs_data and hasattr(logprobs_data, "content") and logprobs_data.content:
@@ -1234,6 +1334,18 @@ class VLLMServerProvider(InferenceProvider):
                         "num_tokens_all": num_tokens,
                     }
                 )
+
+            if opens_think:
+                # The generation starts inside the trace the prompt opened.
+                metadata[PROMPT_OPENS_THINK_KEY] = True
+                closed = server_think_closed(
+                    text,
+                    token_ids=_choice_token_ids(choice),
+                    token_strings=[entry["token"] for entry in logprob_entries or ()],
+                    close_ids=close_ids,
+                )
+                if closed is not None:
+                    metadata[THINK_CLOSED_KEY] = closed
 
             outputs.append(
                 LMOutput(

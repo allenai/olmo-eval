@@ -265,21 +265,48 @@ def test_a_completion_request_is_keyed_by_its_prompt_even_with_messages(tmp_path
 
 
 def test_the_prompt_record_survives_replay(tmp_path: Path) -> None:
-    saved = {"text": "step 1", "finish_reason": "length", "prompt_opens_think": True}
-    _save(tmp_path, "task", [("Q", [saved]), ("R", [{"text": "A"}])])
+    saved = {
+        "text": "step 1",
+        "finish_reason": "length",
+        "prompt_opens_think": True,
+        "think_closed": False,
+    }
+    unknown = {"text": "4", "prompt_opens_think": None}
+    _save(tmp_path, "task", [("Q", [saved]), ("R", [{"text": "A"}]), ("S", [unknown])])
     provider = ReplayProvider(predictions=str(tmp_path))
 
-    marked, unmarked = provider.generate([_completion("Q"), _completion("R")])
+    marked, unmarked, unsure = provider.generate(
+        [_completion("Q"), _completion("R"), _completion("S")]
+    )
 
     assert marked[0].metadata["prompt_opens_think"] is True
+    assert marked[0].metadata["think_closed"] is False
     assert "prompt_opens_think" not in unmarked[0].metadata
+    assert unsure[0].metadata["prompt_opens_think"] is None
 
 
 @pytest.mark.parametrize("setting", [True, "true"])
 def test_prompt_opens_think_marks_runs_saved_without_the_record(tmp_path: Path, setting) -> None:
-    _save(tmp_path, "task", [("Q", [{"text": "step 1", "finish_reason": "length"}])])
+    _save(
+        tmp_path,
+        "task",
+        [
+            ("Q", [{"text": "step 1", "finish_reason": "stop"}]),
+            ("R", [{"text": "4", "original_text": "step 1</think>4", "finish_reason": "length"}]),
+            ("S", [{"text": "x", "prompt_opens_think": True, "think_closed": True}]),
+        ],
+    )
     provider = ReplayProvider(predictions=str(tmp_path), prompt_opens_think=setting)
 
-    replayed = provider.generate([_completion("Q")])[0][0]
+    open_trace, closed, recorded = provider.generate(
+        [_completion("Q"), _completion("R"), _completion("S")]
+    )
 
-    assert replayed.metadata["prompt_opens_think"] is True
+    # Closed if and only if the saved text holds the tag, whatever stopped it.
+    assert (
+        open_trace[0].metadata["prompt_opens_think"],
+        open_trace[0].metadata["think_closed"],
+    ) == (True, False)
+    assert closed[0].metadata["think_closed"] is True
+    # An output that saved its own record keeps it.
+    assert recorded[0].metadata["think_closed"] is True

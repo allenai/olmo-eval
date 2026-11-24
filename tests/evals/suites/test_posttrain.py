@@ -12,7 +12,6 @@ from olmo_eval.evals.suites.posttrain import (
     MODEL_SAMPLING,
     OWN_SAMPLING,
     SAMPLED_FROM,
-    SUPERSEDED_SAMPLED,
 )
 from olmo_eval.evals.tasks.common import get_task
 
@@ -37,16 +36,29 @@ DEV_SHARED = (
 
 
 TEST_SHARED = (
-    "mmlu_pro:cot:v2:t10_32k",
-    "omniscience:judge_v2_t10_32k",
-    "zebralogic:chat_v2_t10_32k",
+    "mmlu_pro:cot:t10_32k",
+    "omniscience:judge_t10_32k",
+    "zebralogic:chat_t10_32k",
     "aime_2025:pass_at_32_t10_32k",
     "aime_2026:pass_at_32_t10_32k",
     "livecodebench_hidden:t10_32k",
     "do_anything_now:wg_judge_thinking_t10_32k",
     "wildjailbreak:wg_judge_thinking_t10_32k",
-    "wmdp:mcq_v2_t10_32k",
+    "wmdp:mcq_t10_32k",
     "bbq:mcq_t10_32k",
+    "strongreject:sr_judge_thinking_t10_32k",
+)
+TEST_SHARED_V2 = (
+    "mmlu_pro:cot:v3:t10_32k",
+    "omniscience:judge_v2_t10_32k",
+    "zebralogic:chat_v2_t10_32k",
+    "aime_2025:pass_at_32_v2_t10_32k",
+    "aime_2026:pass_at_32_v2_t10_32k",
+    "livecodebench_hidden:v2_t10_32k",
+    "do_anything_now:wg_judge_thinking_t10_32k",
+    "wildjailbreak:wg_judge_thinking_t10_32k",
+    "wmdp:mcq_v2_t10_32k",
+    "bbq:mcq_v2_t10_32k",
     "strongreject:sr_judge_thinking_t10_32k",
 )
 CHAT_RULER = ("ruler_plus_all__65536:hillclimb:chat_mt512",)
@@ -60,7 +72,14 @@ MEMBERS = {
     "posttrain:small:dev:chat_ruler": CHAT_RULER,
     "posttrain:small:test": (
         *TEST_SHARED,
-        "hle:text:verified:v2_t10_32k",
+        "hle:text:verified:t10_32k",
+        "arena_hard_v2:t10_32k",
+        "frontierscience:t10_32k",
+    ),
+    "posttrain:tiny:test:v2": TEST_SHARED_V2,
+    "posttrain:small:test:v2": (
+        *TEST_SHARED_V2,
+        "hle:text:verified:v3_t10_32k",
         "arena_hard_v2:v2:t10_32k",
         "frontierscience:v2:t10_32k",
     ),
@@ -252,42 +271,43 @@ def test_chat_ruler_pairs_with_the_completion_cell():
         assert unchanged == completion, task
 
 
-V2_TASKS = (
-    "mmlu_pro_",
-    "omniscience:",
-    "zebralogic:",
-    "wmdp:",
-    "hle:",
-    "arena_hard_v2:",
-    "frontierscience_",
-)
+# Rows whose own extraction already gives the judge nothing for a trace with no </think>.
+TAG_GUARDED = ("do_anything_now:", "wildjailbreak:", "strongreject:")
 
 
-@pytest.mark.parametrize("name", ["posttrain:tiny:test", "posttrain:small:test"])
-def test_test_suites_read_the_v2_variant_of_each_task_that_has_one(name):
-    # An unfinished reasoning trace is no answer in v2; the originals scored it as one.
-    for task in get_suite(name).expand():
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_v2_test_suites_do_not_score_an_unfinished_trace_in_any_row(size):
+    from olmo_eval.evals.extract import extract_think_answer_only
+
+    for task in get_suite(f"posttrain:{size}:test:v2").expand():
         config = get_task(task).config
-        if task.startswith(V2_TASKS):
-            assert "v2" in task, task
-            assert config.strip_unclosed_thinking is True, task
-            assert config.thinking_prefilled == "auto", task
-            assert "v2" in SAMPLED_FROM[task].split(":"), task
+        if task.startswith(TAG_GUARDED):
+            assert config.answer_extractor is extract_think_answer_only, task
+            continue
+        assert config.strip_unclosed_thinking is True, task
+        assert config.thinking_prefilled == "auto", task
 
 
-def test_superseded_specs_still_resolve_and_are_in_no_suite():
-    superseded = {
-        task
-        for entry in SUPERSEDED_SAMPLED
-        for task in (entry.expand() if isinstance(entry, Suite) else (entry,))
-    }
-    held = {task for name in MEMBERS for task in get_suite(name).expand()}
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_v2_test_suites_hold_the_same_rows_as_the_suites_they_version(size):
+    def rows(name: str) -> list[str]:
+        # The task of each member, without its variants.
+        return [task.split(":")[0] for task in get_suite(name).expand()]
 
-    assert "wmdp:mcq_t10_32k" in superseded
-    assert "mmlu_pro_law:cot:t10_32k" in superseded
-    assert "arena_hard_v2:hard_prompt:t10_32k" in superseded
-    assert not superseded & held
-    for task in superseded:
+    assert rows(f"posttrain:{size}:test:v2") == rows(f"posttrain:{size}:test")
+
+
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_the_original_test_suites_keep_their_specs(size):
+    for task in get_suite(f"posttrain:{size}:test").expand():
         config = get_task(task).config
         assert config.thinking_prefilled is False, task
-        assert config.sampling_params.max_tokens == MODEL_SAMPLING["max_tokens"], task
+        assert config.strip_unclosed_thinking is False, task
+        assert task in SAMPLED_FROM and not SAMPLED_FROM[task].endswith((":v2", ":v3")), task
+
+
+@pytest.mark.parametrize("size", ["tiny", "small"])
+def test_dev_and_the_v2_test_suite_share_no_task(size):
+    dev = {task for name in DEV_SUITES[size] for task in get_suite(name).expand()}
+
+    assert not dev & set(get_suite(f"posttrain:{size}:test:v2").expand())

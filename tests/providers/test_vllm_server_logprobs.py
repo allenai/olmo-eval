@@ -64,7 +64,9 @@ class TestVLLMServerProviderLogprobs:
             p._max_length_source = "configured"
             p._max_length_discovery_attempted = True
             p._prompt_logprobs = 5
-            p._chat_opens_think = False
+            # The server is not asked about the prompt unless a test says what it answers.
+            p._request_opens_think = AsyncMock(return_value=False)
+            p._get_think_close_ids = AsyncMock(return_value=None)
             p._completion_use_prompt_token_ids = False
             p._completion_client_side_stop_trim = False
             p._completion_sentencepiece_cleanup = False
@@ -319,7 +321,9 @@ class TestVLLMServerProviderLogprobs:
         assert outputs[0].metadata["prompt_tokens"] == 12
         assert outputs[0].metadata["sum_logits"] == -0.5
 
-    def _probe_server(self, tokenized, detokenized, posted):
+    def _prompt_server(self, replies, posted):
+        """A server whose /tokenize and /detokenize answer from ``replies`` by endpoint."""
+
         class FakeClient:
             async def __aenter__(self):
                 return self
@@ -329,13 +333,25 @@ class TestVLLMServerProviderLogprobs:
 
             async def post(self, url, json):
                 posted.append((url, json))
-                body = tokenized if url.endswith("/tokenize") else detokenized
-                return MagicMock(json=MagicMock(return_value=body))
+                body = replies[url.rsplit("/", 1)[1]]
+                return MagicMock(
+                    json=MagicMock(return_value=body(json) if callable(body) else body)
+                )
 
         return patch(
             "olmo_eval.inference.providers.vllm_server.httpx.AsyncClient",
             return_value=FakeClient(),
         )
+
+    def _unstubbed(self, provider):
+        """Give the provider back its real prompt and tag lookups."""
+        from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
+
+        del provider._request_opens_think
+        del provider._get_think_close_ids
+        assert isinstance(provider, VLLMServerProvider)
+        provider.chat_template_kwargs = None
+        return provider
 
     @pytest.mark.anyio
     @pytest.mark.parametrize(
@@ -347,26 +363,50 @@ class TestVLLMServerProviderLogprobs:
             ({"prompt": "<|im_start|>assistant\n"}, False),
         ],
     )
-    async def test_chat_prompt_probe_reads_the_detokenized_end_of_the_prompt(
+    async def test_the_prompt_end_is_read_from_the_request_as_sent(
         self, provider, detokenized, opens
     ):
+        provider = self._unstubbed(provider)
         provider.chat_template_kwargs = {"enable_thinking": True}
-        provider._chat_opens_think = None
         tokenized = {"tokens": list(range(20)), "token_strs": ["<", "think", ">", "Ċ"]}
         posted = []
-
-        with self._probe_server(tokenized, detokenized, posted):
-            assert await provider._chat_prompt_opens_think() is opens
-            assert await provider._chat_prompt_opens_think() is opens
-
-        # Asked once, with the template settings the requests use.
-        assert [url for url, _ in posted] == [
-            "http://localhost:8000/tokenize",
-            "http://localhost:8000/detokenize",
+        messages = [
+            {"role": "system", "content": "Be brief."},
+            {"role": "user", "content": "Hi"},
         ]
+        tools = [{"type": "function", "function": {"name": "f"}}]
+
+        with self._prompt_server({"tokenize": tokenized, "detokenize": detokenized}, posted):
+            assert await provider._request_opens_think(messages, tools) is opens
+            assert await provider._request_opens_think(messages, tools) is opens
+
+        # Each request is tokenized as it will be sent; one detokenize serves a shared tail.
+        urls = [url.rsplit("/", 1)[1] for url, _ in posted]
+        assert urls == ["tokenize", "detokenize", "tokenize"]
+        assert posted[0][1]["messages"] == messages
+        assert posted[0][1]["tools"] == tools
         assert posted[0][1]["chat_template_kwargs"] == {"enable_thinking": True}
         assert posted[0][1]["add_generation_prompt"] is True
         assert posted[1][1]["tokens"] == list(range(4, 20))
+
+    @pytest.mark.anyio
+    async def test_requests_that_render_differently_are_answered_separately(self, provider):
+        """A system turn that turns thinking off must not inherit another request's answer."""
+        provider = self._unstubbed(provider)
+
+        def tokenize(payload):
+            thinking = payload["messages"][0]["role"] != "system"
+            return {"tokens": [1, 2, 3] if thinking else [1, 2, 4]}
+
+        def detokenize(payload):
+            return {"prompt": "<think>\n" if payload["tokens"][-1] == 3 else "assistant\n"}
+
+        user = {"role": "user", "content": "Hi"}
+        with self._prompt_server({"tokenize": tokenize, "detokenize": detokenize}, []):
+            assert await provider._request_opens_think([user], None) is True
+            off = [{"role": "system", "content": "/no_think"}, user]
+            assert await provider._request_opens_think(off, None) is False
+            assert await provider._request_opens_think([user], None) is True
 
     @pytest.mark.anyio
     @pytest.mark.parametrize(
@@ -379,23 +419,25 @@ class TestVLLMServerProviderLogprobs:
             ({"tokens": [1, 2]}, ["not", "a", "dict"]),
         ],
     )
-    async def test_chat_prompt_probe_reports_an_unusable_reply(
+    async def test_an_unusable_reply_leaves_the_prompt_unknown(
         self, provider, tokenized, detokenized, caplog
     ):
-        provider.chat_template_kwargs = None
-        provider._chat_opens_think = None
+        provider = self._unstubbed(provider)
+        user = [{"role": "user", "content": "Hi"}]
+        replies = {"tokenize": tokenized, "detokenize": detokenized}
 
-        with self._probe_server(tokenized, detokenized, []), caplog.at_level("ERROR"):
-            assert await provider._chat_prompt_opens_think() is False
+        with self._prompt_server(replies, []), caplog.at_level("ERROR"):
+            assert await provider._request_opens_think(user, None) is None
+            assert await provider._request_opens_think(user, None) is None
 
-        assert "Could not read the end of the rendered chat prompt" in caplog.text
+        # Reported once, not per request.
+        assert caplog.text.count("Could not read the end of the rendered chat prompt") == 1
 
     @pytest.mark.anyio
-    async def test_chat_prompt_probe_failure_leaves_outputs_unmarked(self, provider, caplog):
+    async def test_an_unreachable_server_leaves_the_prompt_unknown(self, provider, caplog):
         import httpx
 
-        provider.chat_template_kwargs = None
-        provider._chat_opens_think = None
+        provider = self._unstubbed(provider)
         with (
             patch(
                 "olmo_eval.inference.providers.vllm_server.httpx.AsyncClient",
@@ -403,60 +445,163 @@ class TestVLLMServerProviderLogprobs:
             ),
             caplog.at_level("ERROR"),
         ):
-            assert await provider._chat_prompt_opens_think() is False
+            assert (
+                await provider._request_opens_think([{"role": "user", "content": "Hi"}], None)
+                is None
+            )
+            assert await provider._get_think_close_ids() is None
 
         assert "thinking_prefilled=auto" in caplog.text
 
     @pytest.mark.anyio
-    async def test_completion_outputs_record_a_prompt_that_opens_a_trace(self, provider):
-        client = MagicMock()
-        client.completions.create = AsyncMock(return_value=self._make_completion_response())
-        params = SamplingParams(max_tokens=8)
+    async def test_the_closing_tag_ids_are_asked_once(self, provider):
+        provider = self._unstubbed(provider)
+        posted = []
 
-        opened = await provider._generate_completion(
-            client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q<think>\n"), params
-        )
-        plain = await provider._generate_completion(
-            client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q"), params
+        with self._prompt_server({"tokenize": {"tokens": [27, 1, 28]}}, posted):
+            assert await provider._get_think_close_ids() == [27, 1, 28]
+            assert await provider._get_think_close_ids() == [27, 1, 28]
+
+        assert len(posted) == 1
+        assert posted[0][1]["prompt"] == "</think>"
+        assert posted[0][1]["add_special_tokens"] is False
+
+    @pytest.mark.parametrize(
+        ("text", "token_ids", "token_strings", "close_ids", "closed"),
+        [
+            # The tag in the content is enough.
+            ("plan</think>4", None, None, None, True),
+            # Generated ids decide when the server sent them.
+            ("4", [5, 9, 6], ["a", "", "b"], [9], True),
+            ("trace", [5, 6], ["a", "b"], [9], False),
+            ("4", [5, 27, 1, 28, 6], None, [27, 1, 28], True),
+            ("trace", [5, 27, 28, 1], None, [27, 1, 28], False),
+            # Token strings: the tag's pieces always show when it spans several tokens.
+            ("4", None, ["plan", "</", "think", ">", "4"], [27, 1, 28], True),
+            ("trace", None, ["tr", "ace"], [27, 1, 28], False),
+            # A single-token tag can decode to nothing, so its absence shows nothing.
+            ("4", None, ["plan", "", "4"], [9], None),
+            ("4", None, ["plan", "</think>", "4"], [9], True),
+            # No tag ids, no tokens, or tokens given as ids: nothing to read.
+            ("4", None, ["plan", "4"], None, None),
+            ("4", None, None, [27, 1, 28], None),
+            ("4", None, [], [27, 1, 28], None),
+            ("4", None, ["token_id:5", "token_id:6"], [27, 1, 28], None),
+        ],
+    )
+    def test_closure_is_read_from_what_the_server_returned(
+        self, text, token_ids, token_strings, close_ids, closed
+    ):
+        from olmo_eval.inference.providers.vllm_server import server_think_closed
+
+        assert (
+            server_think_closed(
+                text, token_ids=token_ids, token_strings=token_strings, close_ids=close_ids
+            )
+            is closed
         )
 
-        assert opened[0].metadata["prompt_opens_think"] is True
-        assert opened[0].metadata["think_close_hidden"] is True
-        assert "prompt_opens_think" not in plain[0].metadata
+    def _chat_choice(self, content, finish_reason, tokens, reasoning=None, token_ids=None):
+        choice = MagicMock()
+        choice.message = SimpleNamespace(
+            content=content, tool_calls=None, reasoning_content=reasoning
+        )
+        choice.finish_reason = finish_reason
+        choice.logprobs = SimpleNamespace(
+            content=[SimpleNamespace(token=token, logprob=-0.1, bytes=None) for token in tokens]
+        )
+        choice.token_ids = token_ids
+        choice.model_extra = {}
+        return choice
 
     @pytest.mark.anyio
-    async def test_chat_outputs_record_the_opened_trace_and_separated_reasoning(self, provider):
+    async def test_chat_closure_does_not_follow_the_finish_reason_or_reasoning_field(
+        self, provider
+    ):
+        """The cases a finish-reason rule gets wrong, with a reasoning parser on the server."""
         provider.chat_template_kwargs = None
-        provider._chat_opens_think = True
-        response = self._make_chat_response("The answer is 4.")
-        separated = response.choices[0]
-        separated.finish_reason = "stop"
-        separated.message.reasoning_content = "2 + 2"
-        cut_off = MagicMock()
-        cut_off.message = SimpleNamespace(
-            content="step 1, step 2", tool_calls=None, reasoning_content=None
-        )
-        cut_off.logprobs = None
-        cut_off.finish_reason = "length"
-        response.choices.append(cut_off)
+        provider._request_opens_think = AsyncMock(return_value=True)
+        provider._get_think_close_ids = AsyncMock(return_value=[27, 1, 28])
+        response = self._make_chat_response()
+        response.choices = [
+            # The trace ended at end of turn without closing.
+            self._chat_choice("so it might be", "stop", ["so", " it", " might", " be"]),
+            # The trace closed, then the answer ran to the token limit.
+            self._chat_choice(
+                "The answer is 4 beca", "length", ["plan", "</", "think", ">", "The"]
+            ),
+            # The parser returned an unfinished trace as reasoning, with no content.
+            self._chat_choice(None, "length", ["step", " 1"], reasoning="step 1"),
+        ]
         client = MagicMock()
         client.chat.completions.create = AsyncMock(return_value=response)
         request = LMRequest(
             request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
         )
 
-        outputs = await provider._generate_chat(client, request, SamplingParams(num_samples=2))
+        outputs = await provider._generate_chat(client, request, SamplingParams(num_samples=3))
+
+        from olmo_eval.evals.extract import trace_state
 
         assert all(out.metadata["prompt_opens_think"] is True for out in outputs)
-        assert all(out.metadata["think_close_hidden"] is True for out in outputs)
-        assert outputs[0].metadata["reasoning_separated"] is True
-        assert "reasoning_separated" not in outputs[1].metadata
-        from olmo_eval.evals.extract import trace_unfinished
-
-        assert [trace_unfinished(out.text, out.metadata) for out in outputs] == [False, True]
+        assert [out.metadata["think_closed"] for out in outputs] == [False, True, False]
+        assert [trace_state(out.text, out.metadata) for out in outputs] == [
+            "unclosed",
+            "closed",
+            "unclosed",
+        ]
+        # Several-token tag: the token strings suffice, so no token ids are requested.
+        assert "extra_body" not in client.chat.completions.create.call_args.kwargs
+        saved = build_predictions(
+            [Response(instance=Instance(question="Hi"), request=request, outputs=outputs)]
+        )[0]["model_output"]
+        assert [out["think_closed"] for out in saved] == [False, True, False]
 
     @pytest.mark.anyio
-    async def test_chat_outputs_are_unmarked_when_the_template_opens_no_trace(self, provider):
+    async def test_chat_asks_for_token_ids_when_the_tag_is_one_token(self, provider):
+        provider.chat_template_kwargs = None
+        provider._request_opens_think = AsyncMock(return_value=True)
+        provider._get_think_close_ids = AsyncMock(return_value=[9])
+        response = self._make_chat_response()
+        response.choices = [
+            self._chat_choice("The answer is 4", "stop", ["plan", "", "4"], token_ids=[5, 9, 6]),
+            self._chat_choice("so it might be", "stop", ["so", "it"], token_ids=[5, 6]),
+            # A server that returned no ids leaves a single-token tag undecided.
+            self._chat_choice("so it might be", "stop", ["so", "it"]),
+        ]
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=response)
+        request = LMRequest(
+            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+        )
+
+        outputs = await provider._generate_chat(client, request, SamplingParams(num_samples=3))
+
+        sent = client.chat.completions.create.call_args.kwargs
+        assert sent["extra_body"]["return_token_ids"] is True
+        assert [out.metadata.get("think_closed") for out in outputs] == [True, False, None]
+
+        from olmo_eval.evals.extract import trace_state
+
+        assert trace_state(outputs[2].text, outputs[2].metadata) == "unknown"
+
+    @pytest.mark.anyio
+    async def test_chat_outputs_record_an_unknown_prompt(self, provider):
+        provider.chat_template_kwargs = None
+        provider._request_opens_think = AsyncMock(return_value=None)
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
+        request = LMRequest(
+            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+        )
+
+        outputs = await provider._generate_chat(client, request, SamplingParams(max_tokens=4))
+
+        assert outputs[0].metadata["prompt_opens_think"] is None
+        assert "think_closed" not in outputs[0].metadata
+
+    @pytest.mark.anyio
+    async def test_chat_outputs_are_unmarked_when_the_prompt_opens_no_trace(self, provider):
         provider.chat_template_kwargs = None
         client = MagicMock()
         client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
@@ -467,7 +612,31 @@ class TestVLLMServerProviderLogprobs:
         outputs = await provider._generate_chat(client, request, SamplingParams(max_tokens=4))
 
         assert "prompt_opens_think" not in outputs[0].metadata
-        assert "think_close_hidden" not in outputs[0].metadata
+        assert "think_closed" not in outputs[0].metadata
+        provider._get_think_close_ids.assert_not_awaited()
+
+    @pytest.mark.anyio
+    async def test_completion_outputs_record_a_prompt_that_opens_a_trace(self, provider):
+        provider._get_think_close_ids = AsyncMock(return_value=[27, 1, 28])
+        response = self._make_completion_response()
+        response.choices[0].logprobs = SimpleNamespace(
+            tokens=["test", " completion"], token_logprobs=[-0.1, -0.2], top_logprobs=[]
+        )
+        client = MagicMock()
+        client.completions.create = AsyncMock(return_value=response)
+        params = SamplingParams(max_tokens=8)
+
+        opened = await provider._generate_completion(
+            client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q<think>\n"), params
+        )
+        plain = await provider._generate_completion(
+            client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q"), params
+        )
+
+        assert opened[0].metadata["prompt_opens_think"] is True
+        # Read from the completion's own token strings.
+        assert opened[0].metadata["think_closed"] is False
+        assert "prompt_opens_think" not in plain[0].metadata
 
     @pytest.mark.anyio
     async def test_chat_usage_is_not_attributed_to_each_of_several_choices(self, provider):

@@ -249,7 +249,8 @@ def _extract_cot_letter(text: str) -> str:
 _ANSWER_LEAD_IN = re.compile(
     r"(?:(?i:\banswer\s+is\b:?|\banswer\s*:)[^\S\n]*|\\boxed\{\s*(?:\\text\{\s*)?)"
 )
-_JOIN = r"(?:,\s*(?:and|or)\b|,|/|&|\band\b|\bor\b)"
+# Joins are matched in any case ("C OR E"); the choice letters stay uppercase.
+_JOIN = r"(?:,\s*(?i:and|or)\b|,|/|&|\b(?i:and|or)\b)"
 # A choice letter standing alone, with any emphasis or parentheses around it.
 _CHOICE = r"[*_(]*(?<![A-Za-z])[A-J](?![A-Za-z0-9])[*_)]*"
 _PARENTHESIZED_CHOICE = r"[*_]*\([A-J]\)[*_]*"
@@ -278,7 +279,7 @@ def names_several_choices(text: str) -> bool:
     return choices is not None and len(set(re.findall(r"[A-J]", choices.group(0)))) > 1
 
 
-def _extract_cot_answer_v2(text: str) -> ExtractedAnswer:
+def _extract_cot_answer_v3(text: str) -> ExtractedAnswer:
     """:func:`_extract_cot_answer`, except that an answer naming several letters is none."""
     visible = extract_think_answer(text or "") or ""
     if names_several_choices(visible):
@@ -286,8 +287,8 @@ def _extract_cot_answer_v2(text: str) -> ExtractedAnswer:
     return _extract_cot_answer(text)
 
 
-def _extract_cot_letter_v2(text: str) -> str:
-    return _extract_cot_answer_v2(text).answer
+def _extract_cot_letter_v3(text: str) -> str:
+    return _extract_cot_answer_v3(text).answer
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,13 +316,13 @@ class MMLUProCoTSingleAnswerScorer(Scorer):
     name: str = "exact_match"
 
     def score(self, instance: Instance, output: LMOutput) -> float:
-        answer, format_correct = _extract_cot_answer_v2(output.text or "")
+        answer, format_correct = _extract_cot_answer_v3(output.text or "")
         output.metadata["answer_format_correct"] = format_correct
         gold = str(instance.gold_answer or "")
         return 1.0 if answer.upper() == gold.upper() else 0.0
 
 
-_COT_ACCURACY_V2 = AccuracyMetric(name="exact_match", scorer=MMLUProCoTSingleAnswerScorer)
+_COT_ACCURACY_V3 = AccuracyMetric(name="exact_match", scorer=MMLUProCoTSingleAnswerScorer)
 
 
 class MMLUProCoTTask(MMLUProTask):
@@ -421,14 +422,22 @@ for _category in MMLU_PRO_CATEGORIES:
     register(f"{_name}:cot")(_cot_cls)
     # ``mmlu_pro_<category>:cot:v2``. A reasoning trace that never closed is no answer:
     # ``cot`` runs its extraction cascade over such a trace and credits whichever option
-    # letter (or the word "a") it mentions last. An answer naming several letters is no
-    # answer either, where ``cot`` credits the first of them.
+    # letter (or the word "a") it mentions last.
     register_variant(
         f"{_name}:cot",
         "v2",
-        metrics=(_COT_ACCURACY_V2,),
-        primary_metric=_COT_ACCURACY_V2,
-        answer_extractor=_extract_cot_letter_v2,
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
+    # ``mmlu_pro_<category>:cot:v3``: ``v2``, and an answer naming several letters is no
+    # answer. Each question has one correct choice; ``cot`` and ``v2`` credit one of the
+    # letters such an answer lists.
+    register_variant(
+        f"{_name}:cot",
+        "v3",
+        metrics=(_COT_ACCURACY_V3,),
+        primary_metric=_COT_ACCURACY_V3,
+        answer_extractor=_extract_cot_letter_v3,
         strip_unclosed_thinking=True,
         thinking_prefilled="auto",
     )

@@ -16,48 +16,18 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
-## 2026-11-23: Post-training test suites read the v2 task variants (#590)
-
-- **Affected**: suites `posttrain:tiny:test` and `posttrain:small:test`. The dev suites
-  and their companion suites are unchanged.
-- **Change**: suite membership. Each task that has a `v2` variant is read through it:
-  `mmlu_pro:cot:v2:t10_32k` (14 tasks), `omniscience:judge_v2_t10_32k`,
-  `zebralogic:chat_v2_t10_32k` and `wmdp:mcq_v2_t10_32k` in both suites, and
-  `hle:text:verified:v2_t10_32k`, `arena_hard_v2:v2:t10_32k` and
-  `frontierscience:v2:t10_32k` in Small. The `v2` variants score a reasoning trace that
-  never closed as no answer, including a trace the chat template opened, which the
-  variants they replace scored as an answer. WMDP `accuracy` now covers answered
-  questions only, with `no_answer_rate` beside it. MMLU-Pro also rejects an answer naming
-  several letters. HLE reports `calibration_error_stated` and `confidence_stated_rate`
-  in place of `calibration_error_all_bins`. The other members are unchanged.
-- **Identity**: no task hash moves. The suites hold new specs with their own hashes, and
-  the replaced specs (`wmdp:mcq_t10_32k` and so on) stay registered with theirs, in no
-  suite.
-- **Comparability**: a suite result from before this change is not comparable on the
-  replaced tasks; compare task by task under matching spec names. On one Olmo 3.5 Small
-  SFT checkpoint rescored from the same generations, WMDP moved from 0.361 to 0.214,
-  MMLU-Pro (instance-weighted) from 0.742 to 0.726, ZebraLogic from 0.430 to 0.435,
-  FrontierScience olympiad from 0.24 to 0.22, Arena-Hard hard prompts (style-controlled)
-  from 0.094 to 0.107, and HLE calibration error from 0.884 to 0.791; Omniscience,
-  FrontierScience research, HLE accuracy and Arena-Hard creative-writing win rate did
-  not move. The two variants also differ where no trace was cut off at the limit: WMDP
-  and ZebraLogic `v2` read a finished answer only from the text after a closed trace
-  (`strip_thinking`), MMLU-Pro `v2` rejects several-letter answers, Arena-Hard and
-  FrontierScience `v2` do not send the judge an empty answer or a self-opened `<think>`
-  that never closed, and the WMDP and HLE metrics are defined differently. So no model
-  is guaranteed the same score under both.
-  To reproduce an earlier result, run the replaced specs by name.
-
 ## 2026-11-23: `unclosed_think` counts traces the chat template opened (#588)
 
 - **Affected**: the `generation_counts.unclosed_think` diagnostic of every generation
   task, for models whose chat template ends its generation prompt with `<think>` (the
   Olmo 3.5 templates do), run on the SGLang, inline vLLM or vLLM server provider.
 - **Change**: those providers record on each output that the prompt opened the trace
-  (`prompt_opens_think`, saved with predictions). A generation that then has no
-  `</think>` is counted as an unclosed trace. Before, only an emitted `<think>` with no
+  (`prompt_opens_think`) and, where they have evidence, whether it closed
+  (`think_closed`: a `</think>` in the text or its token id among the generated ids).
+  Both are saved with predictions. A generation with evidence that the trace stayed
+  open is counted as an unclosed trace. Before, only an emitted `<think>` with no
   closing tag was counted, so these runs reported 0 however many generations stopped
-  inside the trace.
+  inside the trace. An output without evidence is not counted.
 - **Identity**: task hashes and scores do not change; only the diagnostic changes.
 - **Comparability**: quality scores remain comparable. `unclosed_think` counts from
   before this change undercount for such models and are not recomputed; `cap_hit` is
