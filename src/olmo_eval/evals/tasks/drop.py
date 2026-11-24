@@ -423,6 +423,20 @@ register_variant(
 )
 
 
+@register("drop:mc:olmo3base:v3")
+class DropMCOlmo3BaseV3(Drop):
+    """drop:mc:olmo3base with multiple-choice few-shot examples. That spec takes the
+    olmo3base variant's generative examples (olmes_drop_fixed), which render with an
+    empty passage, no options and no answer letter."""
+
+    data_source = DataSource(path="allenai/drop_mc", split="validation")
+    formatter = MultipleChoiceFormatter()
+    metrics = (LogprobMCAccuracyMetric(),)
+    primary_metric = LogprobMCAccuracyMetric()
+    num_fewshot = 5
+    fewshot_source = "olmes_drop_mc_fixed"
+
+
 @register("drop:rc")
 class DropRC(Drop):
     data_source = DataSource(path="allenai/drop_mc", split="validation")

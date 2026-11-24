@@ -164,6 +164,15 @@ strongreject_safety_metrics = (
 # Variant Registrations
 # =============================================================================
 
+#: StrongREJECT's fine-tuned grader, the LoRA adapter the ``sr_judge`` provider serves.
+STRONGREJECT_JUDGE_MODEL = "qylu4156/strongreject-15k-v1"
+
 sr_scorer = SafetyScorer(provider_name="sr_judge", judge_format="strongreject")
 
-register_safety_variants("strongreject", strongreject_safety_metrics, sr_scorer, "sr_judge")
+register_safety_variants(
+    "strongreject",
+    strongreject_safety_metrics,
+    sr_scorer,
+    "sr_judge",
+    judge_model=STRONGREJECT_JUDGE_MODEL,
+)

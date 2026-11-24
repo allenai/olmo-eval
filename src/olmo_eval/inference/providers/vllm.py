@@ -5,13 +5,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.debug import is_debug_provider, is_debug_requests
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.hf_cache import refresh_hf_cache
-from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
+from olmo_eval.inference.providers.vllm_server import _replace_context_text
+from olmo_eval.inference.tokenizer_utils import (
+    encode_context_and_continuation,
+    rolling_token_windows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +109,33 @@ def _convert_logprobs(
     return result
 
 
+def _raw_visible_prefix(raw: str, visible: str, special_tokens: list[str]) -> str | None:
+    """Keep a raw token decode through the visible prefix actually returned."""
+    if not special_tokens:
+        return None
+    pattern = re.compile(
+        "|".join(
+            re.escape(token)
+            for token in sorted(special_tokens, key=lambda token: len(token), reverse=True)
+        )
+    )
+    if not pattern.sub("", raw).startswith(visible):
+        return None
+    remaining = len(visible)
+    position = 0
+    for marker in pattern.finditer(raw):
+        size = marker.start() - position
+        if remaining <= size:
+            return raw[: position + remaining]
+        remaining -= size
+        position = marker.end()
+    return raw[: position + remaining]
+
+
 class VLLMProvider(InferenceProvider):
     """Provider using vLLM for high-throughput inference."""
+
+    supports_rolling_logprobs = True
 
     def __init__(
         self,
@@ -183,6 +220,13 @@ class VLLMProvider(InferenceProvider):
         self._add_bos_token: bool | None = engine_kwargs.pop("add_bos_token", None)
 
         self.llm: LLM = LLM(model=model_name, **engine_kwargs)
+        self._closed = False
+
+    def close(self) -> None:
+        """Release the engine core when the evaluation worker finishes."""
+        if not self._closed:
+            self.llm.llm_engine.engine_core.shutdown()
+            self._closed = True
 
     @property
     def max_length(self) -> int:
@@ -258,6 +302,40 @@ class VLLMProvider(InferenceProvider):
 
         return request.prompt
 
+    #: How many times to recount and cut a ContextFit text. A cut can merge or
+    #: split tokens at its edge, so one pass may leave the prompt a token over.
+    _CONTEXT_FIT_PASSES = 3
+
+    def _fit_context(self, request: LMRequest, max_tokens: int | None) -> tuple[LMRequest, int]:
+        """Cut the end of the request's ContextFit text until the prompt fits.
+
+        As ``VLLMServerProvider._fit_context`` does: the prompt is counted as sent against
+        the smaller of ``max_prompt_tokens`` and the window's room for ``max_tokens``.
+        Returns the request to send and how many tokens of the text were cut.
+        """
+        fit = request.context_fit
+        if fit is None:
+            return request, 0
+        room = self.max_length - (max_tokens or 0)
+        budget = room if fit.max_prompt_tokens is None else min(fit.max_prompt_tokens, room)
+        tokenizer = self.llm.get_tokenizer()
+        add_special_tokens = self._add_bos_token is not False
+
+        text, cut_tokens = fit.text, 0
+        for _ in range(self._CONTEXT_FIT_PASSES):
+            prompt = self._format_prompt(request)
+            prompt_tokens = len(tokenizer.encode(prompt, add_special_tokens=add_special_tokens))
+            if prompt_tokens <= budget or not text:
+                break
+            offsets = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)[
+                "offset_mapping"
+            ]
+            overflow = min(prompt_tokens - budget, len(offsets))
+            kept = text[: offsets[-overflow][0]] if overflow < len(offsets) else ""
+            request = _replace_context_text(request, text, kept)
+            text, cut_tokens = kept, cut_tokens + overflow
+        return request, cut_tokens
+
     def generate(
         self,
         requests: list[LMRequest],
@@ -271,7 +349,8 @@ class VLLMProvider(InferenceProvider):
             )
         vllm_params = self._build_sampling_params(params)
 
-        prompt_strs = [self._format_prompt(req) for req in requests]
+        fitted = [self._fit_context(req, params.max_tokens) for req in requests]
+        prompt_strs = [self._format_prompt(req) for req, _ in fitted]
 
         if is_debug_requests():
             for i, prompt in enumerate(prompt_strs):
@@ -292,8 +371,19 @@ class VLLMProvider(InferenceProvider):
         # Disable tqdm progress bar - we use our own worker-scoped logging
         outputs: list[RequestOutput] = self.llm.generate(vllm_prompts, vllm_params, use_tqdm=False)
 
+        tokenizer = self.llm.get_tokenizer()
+        added_vocab = tokenizer.get_added_vocab() if hasattr(tokenizer, "get_added_vocab") else {}
+        harmony_starts = {
+            added_vocab[token] for token in ("<|channel|>", "<|start|>") if token in added_vocab
+        }
+        special_tokens = set(getattr(tokenizer, "all_special_tokens", []))
+        special_tokens.update(
+            str(token)
+            for token in getattr(tokenizer, "added_tokens_decoder", {}).values()
+            if token.special
+        )
         results: list[list[LMOutput]] = []
-        for output in outputs:
+        for output, (_, cut_tokens) in zip(outputs, fitted, strict=True):
             request_outputs: list[LMOutput] = []
             for completion in output.outputs:
                 logprobs = _convert_logprobs(completion.logprobs)
@@ -311,6 +401,26 @@ class VLLMProvider(InferenceProvider):
 
                 metadata["finish_reason"] = completion.finish_reason
                 metadata["completion_tokens"] = len(completion.token_ids)
+                if completion.token_ids and completion.token_ids[0] in harmony_starts:
+                    # vLLM's default decoder drops Harmony's reserved delimiters.
+                    # Keep them for opt-in parsing; baseline text stays unchanged.
+                    raw_text = tokenizer.decode(completion.token_ids, skip_special_tokens=False)
+                    stop_reason = getattr(completion, "stop_reason", None)
+                    if completion.finish_reason == "stop" and isinstance(stop_reason, str):
+                        # Stop strings match the visible decode, and can also occur
+                        # inside raw delimiter spellings or span removed delimiters.
+                        truncated = _raw_visible_prefix(
+                            raw_text, completion.text, list(special_tokens)
+                        )
+                        if truncated is None:
+                            metadata["response_parser_error"] = (
+                                "Cannot align Harmony token decode with returned completion text"
+                            )
+                        else:
+                            raw_text = truncated
+                    metadata["text_with_special_tokens"] = raw_text
+                if cut_tokens:
+                    metadata[CONTEXT_CUT_TOKENS_KEY] = cut_tokens
 
                 request_outputs.append(
                     LMOutput(
@@ -386,9 +496,13 @@ class VLLMProvider(InferenceProvider):
         tokenizer = self.llm.get_tokenizer()
         default_max_len = self.max_length
 
-        # Build token sequences for all continuations
+        # Each continuation becomes one or more vLLM inputs ("windows"): one,
+        # left-truncated to fit, for an ordinary request, or as many as a
+        # rolling request needs to score its whole text.
         token_inputs: list[list[int]] = []
-        request_meta: list[tuple[int, int, int]] = []  # (ctxlen, num_tokens_all, overflow)
+        windows_per_continuation: list[list[tuple[list[int], int]]] = []
+        # (num_tokens_all, overflow, window tokens if rolling else None)
+        continuation_meta: list[tuple[int, int, int | None]] = []
 
         for request in requests:
             # Use per-request max_length if set (e.g., from task config), else provider default.
@@ -400,18 +514,31 @@ class VLLMProvider(InferenceProvider):
                 context_enc, continuation_enc = encode_context_and_continuation(
                     tokenizer, prompt, continuation
                 )
+                window_tokens: int | None = None
+                if request.rolling:
+                    if max_len > default_max_len:
+                        raise ValueError(
+                            f"rolling request max_length {max_len} exceeds the engine's "
+                            f"max_model_len {default_max_len}"
+                        )
+                    # Inputs of max_length - 1 leave room for the one generated token.
+                    window_tokens = max_len - 1
+                    windows = rolling_token_windows(context_enc, continuation_enc, window_tokens)
+                    overflow = 0
+                else:
+                    # Calculate overflow and left-truncate to max_length - 1
+                    full_len = len(context_enc) + len(continuation_enc)
+                    overflow = full_len - (max_len - 1)
+                    inp = (context_enc + continuation_enc)[-(max_len - 1) :]
+                    # Adjust ctxlen based on overflow
+                    ctxlen = max(0, len(context_enc) - max(0, overflow))
+                    windows = [(inp, ctxlen)]
 
-                # Calculate overflow and left-truncate to max_length - 1
-                full_len = len(context_enc) + len(continuation_enc)
-                overflow = full_len - (max_len - 1)
-                inp = (context_enc + continuation_enc)[-(max_len - 1) :]
-
-                # Adjust ctxlen based on overflow
-                ctxlen = len(context_enc) - max(0, overflow)
-                ctxlen = max(0, ctxlen)  # Ensure non-negative
-
-                token_inputs.append(inp)
-                request_meta.append((ctxlen, len(inp), overflow))
+                token_inputs.extend(window for window, _ in windows)
+                windows_per_continuation.append(windows)
+                # num_tokens_all counts the tokens sent to the model, overlap included.
+                sent = sum(len(window) for window, _ in windows)
+                continuation_meta.append((sent, overflow, window_tokens))
 
         # Call vLLM with token IDs instead of strings
         # Pass as list of dicts with prompt_token_ids key
@@ -419,15 +546,15 @@ class VLLMProvider(InferenceProvider):
         prompts = [{"prompt_token_ids": tokens} for tokens in token_inputs]
 
         if is_debug_requests():
-            logger.info(f"vLLM logprobs: {len(prompts)} continuations")
+            logger.info(f"vLLM logprobs: {len(prompts)} inputs")
             logger.info(f"Sampling params: {vllm_params}")
 
         outputs: list[RequestOutput] = self.llm.generate(prompts, vllm_params, use_tqdm=False)
 
         # Parse results back to per-request structure
         output_iter = iter(outputs)
-        meta_iter = iter(request_meta)
-        tokens_iter = iter(token_inputs)
+        windows_iter = iter(windows_per_continuation)
+        meta_iter = iter(continuation_meta)
         results = []
 
         for request in requests:
@@ -435,65 +562,39 @@ class VLLMProvider(InferenceProvider):
             request_outputs = []
 
             for continuation in continuations:
-                output = next(output_iter)
-                ctxlen, num_tokens_all, overflow = next(meta_iter)
-                inp = next(tokens_iter)
+                windows = next(windows_iter)
+                num_tokens_all, overflow, window_tokens = next(meta_iter)
 
                 logprob_entries: list[LogProbEntry] = []
                 total = 0.0
                 is_greedy = True
+                for inp, ctxlen in windows:
+                    entries, window_total, window_greedy = _score_window(
+                        next(output_iter), inp, ctxlen, tokenizer
+                    )
+                    logprob_entries.extend(entries)
+                    total += window_total
+                    is_greedy = is_greedy and window_greedy
 
-                prompt_logprobs = output.prompt_logprobs or []
-                # Skip the first ctxlen positions (context tokens)
-                cont_logprobs = prompt_logprobs[ctxlen:] if ctxlen < len(prompt_logprobs) else []
-                # Get continuation token IDs from the actual input
-                cont_tokens = inp[ctxlen:]
-
-                for token_id, token_probs in zip(cont_tokens, cont_logprobs, strict=True):
-                    if not token_probs:
-                        continue
-
-                    # Check if this token is the argmax (greedy choice).
-                    # Must check BEFORE the lp_obj gate so we catch non-greedy tokens
-                    # even when they aren't in the top-k returned by prompt_logprobs.
-                    if is_greedy:
-                        max_token_id = max(
-                            token_probs.keys(),
-                            key=lambda tid: _coerce_logprob_to_num(token_probs[tid]),
+                metadata: dict[str, Any] = {
+                    "total_logprob": total,
+                    "sum_logits": total,  # Alias for compatibility
+                    "num_tokens": len(logprob_entries),
+                    "num_tokens_all": num_tokens_all,
+                    "is_greedy": is_greedy,
+                    "prompt_truncated_tokens": max(0, overflow),
+                }
+                if window_tokens is not None:
+                    expected = sum(len(window) - ctxlen for window, ctxlen in windows)
+                    if len(logprob_entries) != expected:
+                        # A missing token would drop out of the sum but not the bytes.
+                        raise RuntimeError(
+                            f"rolling request scored {len(logprob_entries)} of {expected} tokens"
                         )
-                        if max_token_id != token_id:
-                            is_greedy = False
-
-                    # Look up logprob for the actual continuation token (not first key in dict)
-                    lp_obj = token_probs.get(token_id)
-                    if lp_obj is None:
-                        continue
-                    logprob_val = _coerce_logprob_to_num(lp_obj)
-
-                    token_str = _get_token_string(lp_obj, token_id, tokenizer)
-                    logprob_entries.append(
-                        {
-                            "token": token_str,
-                            "logprob": logprob_val,
-                            "token_id": int(token_id),
-                            "bytes": list(token_str.encode("utf-8")),
-                        }
-                    )
-                    total += logprob_val
-
-                num_tokens = len(logprob_entries)
+                    metadata["num_windows"] = len(windows)
+                    metadata["window_tokens"] = window_tokens
                 request_outputs.append(
-                    LMOutput(
-                        text=continuation,
-                        logprobs=logprob_entries,
-                        metadata={
-                            "total_logprob": total,
-                            "sum_logits": total,  # Alias for compatibility
-                            "num_tokens": num_tokens,
-                            "num_tokens_all": num_tokens_all,
-                            "is_greedy": is_greedy,
-                        },
-                    )
+                    LMOutput(text=continuation, logprobs=logprob_entries, metadata=metadata)
                 )
 
             results.append(request_outputs)
@@ -534,3 +635,52 @@ class VLLMProvider(InferenceProvider):
             List of output lists with logprobs populated.
         """
         return await asyncio.to_thread(self.logprobs, requests, sampling_params)
+
+
+def _score_window(
+    output: RequestOutput, inp: list[int], ctxlen: int, tokenizer: Any
+) -> tuple[list[LogProbEntry], float, bool]:
+    """Logprob entries, their sum, and greediness for the tokens ``inp[ctxlen:]``."""
+    logprob_entries: list[LogProbEntry] = []
+    total = 0.0
+    is_greedy = True
+
+    prompt_logprobs = output.prompt_logprobs or []
+    # Skip the first ctxlen positions (context tokens)
+    cont_logprobs = prompt_logprobs[ctxlen:] if ctxlen < len(prompt_logprobs) else []
+    # Get continuation token IDs from the actual input
+    cont_tokens = inp[ctxlen:]
+
+    for token_id, token_probs in zip(cont_tokens, cont_logprobs, strict=True):
+        if not token_probs:
+            continue
+
+        # Check if this token is the argmax (greedy choice).
+        # Must check BEFORE the lp_obj gate so we catch non-greedy tokens
+        # even when they aren't in the top-k returned by prompt_logprobs.
+        if is_greedy:
+            max_token_id = max(
+                token_probs.keys(),
+                key=lambda tid: _coerce_logprob_to_num(token_probs[tid]),
+            )
+            if max_token_id != token_id:
+                is_greedy = False
+
+        # Look up logprob for the actual continuation token (not first key in dict)
+        lp_obj = token_probs.get(token_id)
+        if lp_obj is None:
+            continue
+        logprob_val = _coerce_logprob_to_num(lp_obj)
+
+        token_str = _get_token_string(lp_obj, token_id, tokenizer)
+        logprob_entries.append(
+            {
+                "token": token_str,
+                "logprob": logprob_val,
+                "token_id": int(token_id),
+                "bytes": list(token_str.encode("utf-8")),
+            }
+        )
+        total += logprob_val
+
+    return logprob_entries, total, is_greedy

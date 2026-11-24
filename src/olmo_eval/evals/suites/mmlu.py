@@ -49,3 +49,10 @@ MMLU_COT = make_suite(
     aggregation=AggregationStrategy.AVERAGE,
     description="0-shot chain-of-thought MMLU across all 57 subjects",
 )
+
+MMLU_COT_HILLCLIMB = make_suite(
+    "mmlu:cot:hillclimb",
+    _task_names_variant(MMLU_SUBJECTS, "cot:hillclimb"),
+    aggregation=AggregationStrategy.AVERAGE,
+    description="mmlu:cot on a fixed 18-item sample per subject (1,026 items), for hill-climbing",
+)

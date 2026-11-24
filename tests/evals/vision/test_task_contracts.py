@@ -67,7 +67,7 @@ class TestDenseCaptionPerInstanceMetrics:
     def test_avg_has_no_per_instance_value(self):
         response = _response(self.RESULT, scores={"dense_caption_judge": 0.123})
         assert DenseCaptionAvgMetric().compute_instance(response) is None
-        assert DenseCaptionAvgMetric().supports_pairwise_scorer_fallback() is False
+        assert DenseCaptionAvgMetric().supports_scorer_fallback() is False
 
     def test_scorer_fallback_disabled(self):
         # no judge result at all: the poisoned scorer channel must NOT leak through
@@ -87,8 +87,8 @@ class TestDenseCaptionPerInstanceMetrics:
 
     def test_legacy_scale_displays_as_raw(self):
         # 0-100 legacy values must not be re-scaled by the percentage renderer
-        assert _metric("recall").pairwise_display_format() == "raw"
-        assert DenseCaptionAvgMetric().pairwise_display_format() == "raw"
+        assert _metric("recall").display_format() == "raw"
+        assert DenseCaptionAvgMetric().display_format() == "raw"
 
 
 class TestPromptFamilyFieldsAreOptIn:
@@ -237,7 +237,7 @@ class TestSubsetMetricsPerInstance:
         r = self._response({"is_human": False}, scorer.name)
         assert human.compute_instance(r) is None  # augmented row, human metric
         assert aug.compute_instance(r) == 1.0
-        assert human.supports_pairwise_scorer_fallback() is False
+        assert human.supports_scorer_fallback() is False
 
     def test_mmmu_pro_setting(self):
         from olmo_eval.evals.vision.benchmarks.mmmu_pro import MmmuProSettingMetric
@@ -247,7 +247,7 @@ class TestSubsetMetricsPerInstance:
         std = MmmuProSettingMetric(name="standard_10", scorer=scorer, setting="standard10")
         r = self._response({"mmmu_pro_setting": "vision"}, scorer.name)
         assert std.compute_instance(r) is None
-        assert std.supports_pairwise_scorer_fallback() is False
+        assert std.supports_scorer_fallback() is False
 
     def test_charxiv_category_and_invalid_flag(self):
         from olmo_eval.evals.vision.benchmarks.charxiv import (
@@ -264,4 +264,59 @@ class TestSubsetMetricsPerInstance:
         assert n_invalid.compute_instance(invalid) == 1.0
         overall = CharxivScoreMetric(name="score", scorer=scorer, category=None)
         assert overall.compute_instance(invalid) == 0.0
-        assert overall.supports_pairwise_scorer_fallback() is False
+        assert overall.supports_scorer_fallback() is False
+
+
+class TestLazyMultiImageRequests:
+    def test_list_entries_flatten_and_cap(self, tmp_path):
+        PIL_Image = pytest.importorskip("PIL.Image")
+        from olmo_eval.evals.vision.data.images import capped_image_list
+
+        paths = []
+        for i in range(3):
+            path = tmp_path / f"{i}.png"
+            PIL_Image.new("RGB", (2 + i, 2)).save(path)
+            paths.append(str(path))
+        entry = capped_image_list(paths, max_images=2)
+        resolved = resolve_images((entry,))
+        assert resolved is not None
+        assert [img.size for img in resolved] == [(2, 2), (3, 2)]
+
+
+class TestMultiImageSubsetMetricsPerInstance:
+    """MuirBench categories, BLINK subtasks and MMIU buckets must not persist the
+    overall scorer value for instances outside their scope."""
+
+    def _response(self, metadata: dict, scorer_name: str):
+        return Response(
+            instance=Instance(question="q", gold_answer=None, metadata=metadata),
+            request=LMRequest(request_type=RequestType.CHAT, prompt="q"),
+            outputs=[LMOutput(text="A")],
+            scores={scorer_name: 1.0},  # poisoned channel
+        )
+
+    def test_category_metric_scopes_to_its_category(self):
+        from olmo_eval.evals.vision.scoring.multi_image import MultiImageMcScorer
+        from olmo_eval.evals.vision.tasks.multi_image import MultiImageCategoryMetric
+
+        scorer = MultiImageMcScorer()
+        ordering = MultiImageCategoryMetric(
+            name="ordering", scorer=scorer, field="task", category="Ordering"
+        )
+        overall = MultiImageCategoryMetric(name="all", scorer=scorer, field="task", category=None)
+        counting = self._response({"task": "Counting"}, scorer.name)
+        assert ordering.compute_instance(counting) is None
+        assert overall.compute_instance(counting) == 1.0
+        assert ordering.supports_scorer_fallback() is False
+
+    def test_count_bucket_metric_scopes_to_its_bucket(self):
+        from olmo_eval.evals.vision.scoring.multi_image import MultiImageMcScorer
+        from olmo_eval.evals.vision.tasks.multi_image import MultiImageCountBucketMetric
+
+        scorer = MultiImageMcScorer()
+        small = MultiImageCountBucketMetric(name="le10", scorer=scorer, max_images=10)
+        large = MultiImageCountBucketMetric(name="gt20", scorer=scorer, min_images=20)
+        r = self._response({"num_images": 4}, scorer.name)
+        assert small.compute_instance(r) == 1.0
+        assert large.compute_instance(r) is None
+        assert large.supports_scorer_fallback() is False

@@ -28,7 +28,7 @@ class CodeExecutionScorer3s(CodeExecutionScorer):
 class HumanEval(Task):
     """HumanEval code generation task."""
 
-    data_source = DataSource(path="openai_humaneval")
+    data_source = DataSource(path="openai/openai_humaneval")
     sampling_params = SamplingParams(
         max_tokens=1024,
         temperature=0.0,

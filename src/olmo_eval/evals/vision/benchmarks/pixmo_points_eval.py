@@ -41,6 +41,14 @@ def _format_query(label: str) -> str:
     return f"Point to {text}."
 
 
+def _image_header_size(path: str) -> tuple[int, int]:
+    """``(width, height)`` from the image header, without decoding the pixels."""
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return image.size
+
+
 def _build_instances(question_for: Callable[[str, int], str]) -> Iterator[Instance]:
     """Yield the v3 arrow examples in dataset order, prompted by ``question_for``."""
     import datasets
@@ -52,19 +60,23 @@ def _build_instances(question_for: Callable[[str, int], str]) -> Iterator[Instan
         ex = ds[idx]
         label = str(ex["label"])
         rles = ex["segmentation_rles"]
-        image_size = None
+        image_path = rebase_data_path(str(ex["image"]))
         if rles:
             size = rles[0]["size"]
             if isinstance(size, str):
                 size = ast.literal_eval(size)
             image_size = (int(size[1]), int(size[0]))  # (width, height)
+        else:
+            # An absent phrase has no mask to take the size from; the scorer still
+            # needs it to place predicted points, so read the image header.
+            image_size = _image_header_size(image_path)
         yield Instance(
             question=question_for(label, idx),
             gold_answer=None,
             metadata={
                 "pointing_annotators": [rles],  # single annotator
                 "image_size": image_size,
-                "image_path": rebase_data_path(str(ex["image"])),
+                "image_path": image_path,
                 "example_id": ex["example_id"],
                 "label": label,
             },

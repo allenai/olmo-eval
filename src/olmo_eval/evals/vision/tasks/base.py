@@ -24,9 +24,20 @@ class VisionTask(Task):
     #: Image decoding is needed to build instances, whichever provider runs them.
     dependencies = ["pillow"]
 
+    #: Whether the task aggregates several samples per example itself.
+    multi_sample: bool = False
+
     @property
     def instances(self) -> Iterator[Instance]:
         if self._instances_cache is None:
+            params = self.config.sampling_params
+            if params is not None and params.num_samples > 1 and not self.multi_sample:
+                # The metric families read one output per example, and mm_olmo scores a
+                # single greedy sample; averaging or maxing samples would be neither.
+                raise ValueError(
+                    f"{self.config.name} scores one sample per example; "
+                    "num_samples > 1 is not supported"
+                )
             # `config.limit` is left to the runner, which draws a seeded random sample
             # exactly as it does for the text tasks.
             self._instances_cache = list(self._build_instances())
