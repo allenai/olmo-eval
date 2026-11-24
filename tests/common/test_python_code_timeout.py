@@ -1,6 +1,7 @@
 """Python solution timeouts are failed solutions, not broken transport."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,21 @@ from olmo_eval.common.types import Instance, LMOutput
 
 
 class CommandEnvironment:
+    @property
+    def is_running(self):
+        return True
+
+    async def execute(self, command, timeout=None):
+        return (await self.execute_command(command, timeout)).output
+
+    async def execute_with_files(self, command, files, timeout=None):
+        assert len(command.encode()) < 4096
+        for filename, content in files.items():
+            path = Path(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        return await self.execute_command(command, timeout)
+
     async def execute_command(self, command, timeout=None):
         process = await asyncio.create_subprocess_shell(
             command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -49,3 +65,12 @@ async def test_transport_failure_still_propagates():
     output = LMOutput(text="", extracted_answer="def answer():\n    return 42\n")
     with pytest.raises(ConnectionError, match="transport unavailable"):
         await scorer.ascore(instance, output, BrokenEnvironment())
+
+
+@pytest.mark.anyio
+async def test_large_quoted_payload_uses_file_staging():
+    scorer = CodeExecutionScorer(timeout=1)
+    tests = "# 'quoted payload'\n" * 20000 + "assert answer() == 42"
+    instance = Instance(question="answer", metadata={"test": tests})
+    output = LMOutput(text="", extracted_answer="def answer():\n    return 42\n")
+    assert await scorer.ascore(instance, output, CommandEnvironment()) == 1.0

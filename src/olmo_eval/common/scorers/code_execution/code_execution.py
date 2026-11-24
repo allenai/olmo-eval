@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from olmo_eval.common.execution.environment import StagingExecutionEnvironment
 from olmo_eval.common.types import Instance, LMOutput
 
 from ..execution import ExecutionScorer
@@ -76,13 +77,16 @@ class CodeExecutionScorer(ExecutionScorer):
         inner_command = shlex.quote(" && ".join(inner_cmd_parts))
         run_cmd = f"timeout --kill-after=1s {math.ceil(timeout)} bash -c {inner_command}"
 
+        staged = isinstance(execution_env, StagingExecutionEnvironment)
+        setup = [f"mkdir -p {quoted_tmp_dir} || exit $?"]
+        if not staged:
+            setup.append(
+                f"printf '%s' {shlex.quote(code)} > {quoted_script_path}"
+                f" || {{ status=$?; {cleanup_cmd}; exit $status; }}"
+            )
         command = "\n".join(
             [
-                f"mkdir -p {quoted_tmp_dir} || exit $?",
-                (
-                    f"printf '%s' {shlex.quote(code)} > {quoted_script_path}"
-                    f" || {{ status=$?; {cleanup_cmd}; exit $status; }}"
-                ),
+                *setup,
                 f"cd {quoted_tmp_dir} || {{ status=$?; {cleanup_cmd}; exit $status; }}",
                 "status=0",
                 f"{run_cmd} || status=$?",
@@ -90,8 +94,12 @@ class CodeExecutionScorer(ExecutionScorer):
                 "exit $status",
             ]
         )
-
-        return await execution_env.execute_command(command, timeout=math.ceil(timeout) + 5.0)
+        outer_timeout = math.ceil(timeout) + 5.0
+        if staged:
+            return await execution_env.execute_with_files(
+                command, {script_path: code}, timeout=outer_timeout
+            )
+        return await execution_env.execute_command(command, timeout=outer_timeout)
 
     async def ascore(
         self,
