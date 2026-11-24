@@ -33,6 +33,46 @@ def has_bos_token(tokenizer: Any) -> bool:
     return tokenizer.bos_token_id is not None
 
 
+def default_prefix_ids(tokenizer: Any) -> list[int]:
+    """Return the special tokens the tokenizer puts in front of a text by default.
+
+    They are measured, not read from a flag: a probe is encoded with and without
+    special tokens, and whatever comes before the probe's own tokens is the prefix.
+    This is the BOS for tokenizers that add it, including through a post-processor
+    template (``add_bos_token`` reads False for those under transformers 5), and
+    nothing for tokenizers that add nothing (OLMo, Qwen). Special tokens appended
+    after the text (an EOS) are not part of the prefix.
+
+    Args:
+        tokenizer: A tokenizer object with an encode method.
+
+    Returns:
+        The prefix token IDs; empty for tokenizers that add nothing in front.
+    """
+    probe = "a"
+    with_special = tokenizer.encode(probe, add_special_tokens=True)
+    without_special = tokenizer.encode(probe, add_special_tokens=False)
+    if not without_special:
+        return []
+    width = len(without_special)
+    for start in range(len(with_special) - width + 1):
+        if with_special[start : start + width] == without_special:
+            return list(with_special[:start])
+    return []
+
+
+def leading_token_bytes(tokenizer: Any, text: str, token_id: int) -> int:
+    """UTF-8 bytes of ``text`` covered by its first token, ``token_id``.
+
+    A token that splits a character decodes to U+FFFD; it is counted as the whole
+    first character, at most 3 bytes more than it covers.
+    """
+    piece = tokenizer.decode([token_id])
+    if piece and "�" not in piece and text.startswith(piece):
+        return len(piece.encode("utf-8"))
+    return len(text[:1].encode("utf-8"))
+
+
 def get_context_token_ids(
     tokenizer: Any,
     context: str,
@@ -117,18 +157,24 @@ def rolling_token_windows(
     (``get_rolling_token_windows`` with context length 1, then
     ``make_disjoint_window``).
 
+    With no prefix (a tokenizer that adds no BOS) the text starts cold: its first
+    token is the context and only ``tokens[1:]`` are scored, so the model never
+    sees a special token in a place it was not trained to.
+
     Args:
-        prefix: Context tokens before the text, usually just BOS. Not scored.
+        prefix: The tokenizer's own prefix (``default_prefix_ids``), usually BOS or
+            nothing. Not scored.
         tokens: Tokens of the text to score.
         max_len: Most tokens one input may hold.
 
     Returns:
         ``(input_ids, ctxlen)`` pairs; ``input_ids[ctxlen:]`` are the tokens scored.
+        Empty for a text of fewer than two tokens with no prefix.
     """
     if not prefix:
-        raise ValueError(
-            "rolling_token_windows needs a prefix token (BOS) to score the first token"
-        )
+        if len(tokens) < 2:
+            return []
+        prefix, tokens = tokens[:1], tokens[1:]
     if max_len <= len(prefix):
         raise ValueError(f"max_len {max_len} leaves no room after a {len(prefix)}-token prefix")
     sequence = prefix + tokens
