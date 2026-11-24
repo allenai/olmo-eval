@@ -8,6 +8,16 @@ make_suite(
 )
 
 make_suite(
+    "minerva_math:chat",
+    tuple(f"minerva_math_{t}:chat" for t in MATH_SUBSETS),
+    aggregation=AggregationStrategy.AVERAGE,
+    description=(
+        "Minerva MATH (the 5,000-problem MATH test set, seven subjects, macro-averaged) "
+        "as a zero-shot chat task for reasoning models; see the minerva_math_*:chat variants."
+    ),
+)
+
+make_suite(
     "aime_2022_to_2026",
     (
         "aime_2022:pass_at_32",

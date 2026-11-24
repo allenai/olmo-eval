@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from typing import Any
 
-from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
+from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter, PPLFormatter
 from olmo_eval.common.metrics import AccuracyMetric, BPBMetricInstanceAvg, PassAtKMetric
 from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, SamplingParams
@@ -440,3 +440,29 @@ for _bpb_subset in MATH_SUBSETS:
 
     register_variant(_bpb_task_name, "olmo3base", fewshot_source="minerva_math_fixed")
     register_variant(_bpb_task_name, "olmes", fewshot_source="minerva_math_fixed")
+
+
+# =============================================================================
+# Chat variant for reasoning models (zero-shot, R1-style instruction)
+# =============================================================================
+# The few-shot completion variants above stop at a blank line and cap generation at 1,024 tokens,
+# which truncates any model that reasons first. Here each problem is one chat turn ending with the
+# R1-style instruction, there are no stop sequences, and the answer is extracted (Minerva
+# extractor, sympy-equivalence grader as above) only from text after the last </think>; a trace
+# that never closes scores as no answer. The thinking models this was written for pre-fill
+# "<think>" (thinking_prefilled); for a model that never thinks, pass -o thinking_prefilled=false.
+# Sampling and the budget are meant to be set per run (-o temperature=... -o max_tokens=...).
+_CHAT_FORMATTER = ChatFormatter(
+    user_template=(
+        "{question}\n\nPlease reason step by step, and put your final answer within \\boxed{{}}."
+    ),
+)
+_CHAT_OVERRIDES: dict[str, Any] = {
+    "formatter": _CHAT_FORMATTER,
+    "num_fewshot": 0,
+    "sampling_params": SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95),
+    **FINAL_ANSWER_OVERRIDES,
+}
+for _subset in MATH_SUBSETS:
+    register_variant(f"minerva_math_{_subset}", "chat", **_CHAT_OVERRIDES)
+register_variant("math500", "chat", **_CHAT_OVERRIDES)
