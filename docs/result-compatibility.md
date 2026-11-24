@@ -36,22 +36,24 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Identity**: task hashes are unchanged: this changes scorer implementation,
   not serialized task settings. Distinguish results by evaluator revision and
   execution environment; the task hash alone does not identify this boundary.
-- **Failure accounting**: on current main, scoring failures have no value; affected
-  samples are omitted from metric aggregation, and instances without a scored
-  output count against `max_hard_failure_rate`. Older evaluator revisions could
-  store a synthetic zero alongside `scoring_errors`; the pinned `56dc8921` image
-  used in the Tiny mixing study does so. Its native runner marks infrastructure
-  scoring errors incomplete, while the study's stricter wrapper aborts the grader
-  job on any scoring error. Independently, the older `execute_code` path could
-  return a failed execution result for an argument-size error instead of raising:
-  that became a zero with `execution_result.error` but no `scoring_errors` flag.
-  Each of the five originally completed Tiny mixing-study HumanEval+ panels
-  contains 20 such zeros out of 164 examples, including five-pool600 (Beaker
-  dataset `01M86MHP21N6ASCKVGZGD0SW71`,
-  `evaluation/humaneval_plus_chat_pass_at_1-predictions.json`). Do not infer historical denominator handling from an error label or
-  successful job status alone. With this fix, an ordinary solution time-limit failure is a
-  scored zero and stays in the denominator; genuine infrastructure failures keep
-  the runner's existing failure handling.
+- **Failure accounting**: current main and the study's pinned `56dc8921` image
+  leave raised scoring failures unscored, omit those samples from metric
+  aggregation, and count instances without a scored output against
+  `max_hard_failure_rate`. The study's stricter wrapper instead aborts the grader
+  job on any scoring error. Older runner revisions described in the October 22
+  failure-accounting entry could store a synthetic zero alongside `scoring_errors`;
+  that older behavior must not be attributed to the pinned study image.
+  Independently, `execute_code` could catch an argument-size error and return a
+  failed execution result instead of raising: that became a zero with
+  `execution_result.error` but no `scoring_errors` flag. Each of the five originally
+  completed Tiny mixing-study HumanEval+ panels contains 20 such zeros out of 164
+  examples, including five-pool600 (Beaker dataset
+  `01M86MHP21N6ASCKVGZGD0SW71`,
+  `evaluation/humaneval_plus_chat_pass_at_1-predictions.json`). Do not infer
+  denominator handling from an error label or successful job status alone. With
+  this fix, an ordinary solution time-limit failure is a scored zero and stays in
+  the denominator; genuine infrastructure failures retain the runner's existing
+  failure handling.
 - **Comparability and recovery**: inspect saved predictions, error counts and the
   evaluator revision, including `execution_result.error` as well as
   `scoring_errors`. A completed metric with omitted timed-out solutions can be
