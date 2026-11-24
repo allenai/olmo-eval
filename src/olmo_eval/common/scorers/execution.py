@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar
 
-from olmo_eval.common.types import Instance, LMOutput
+from olmo_eval.common.types import Instance, LMOutput, Response
 
 from .base import Scorer
 
@@ -164,5 +165,55 @@ class ExecutionScorer(Scorer):
 
         Returns:
             Score as a float (typically 0.0 to 1.0).
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class ResponseBatchScorer(Scorer):
+    """Base class for scorers that grade a batch of responses in one call.
+
+    Subclasses declare ``batch_size`` (number of responses per call, or ``None``
+    to grade all responses in a bucket together) and implement
+    :meth:`ascore_batch`, which receives a sequence of :class:`Response`
+    objects and a :class:`ScoringContext` and returns one score per response
+    (or one sequence of per-output scores per response) in the same order.
+
+    Subclasses whose grading protocol groups responses before batching (for
+    example CharXiv descriptive grading, which batches up to 5 responses sharing
+    the same question template id) may override :meth:`batch_key`.
+    """
+
+    requires_async: ClassVar[bool] = True
+    batch_size: int | None = None
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        """Sync single-output scoring is not supported for response-batch scorers."""
+        raise RuntimeError(
+            f"{self.__class__.__name__} requires batch async execution via ascore_batch(). "
+            "Use Task.score_responses() with a ScoringContext."
+        )
+
+    def batch_key(self, response: Response) -> Hashable:
+        """Group key for batching responses; different keys are batched separately."""
+        return None
+
+    @abstractmethod
+    async def ascore_batch(
+        self,
+        responses: Sequence[Response],
+        context: ScoringContext,
+    ) -> Sequence[float | list[float | None] | tuple[float | None, ...] | None]:
+        """Score a batch of responses in one call.
+
+        Args:
+            responses: Non-empty batch of responses to grade together.
+            context: The scoring context with concurrency and runtime settings.
+
+        Returns:
+            A sequence aligned with ``responses``. Each element may be a single
+            ``float`` (applied to the response's outputs), ``None`` (unscored),
+            or a sequence of per-output ``float | None`` values aligned with
+            ``response.outputs``.
         """
         ...

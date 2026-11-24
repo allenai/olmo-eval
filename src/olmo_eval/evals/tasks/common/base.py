@@ -8,7 +8,7 @@ import json
 import logging
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Hashable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
@@ -32,6 +32,7 @@ from olmo_eval.common.types import (
 
 if TYPE_CHECKING:
     from olmo_eval.common.execution import ScoringContext
+    from olmo_eval.common.scorers.execution import ResponseBatchScorer
     from olmo_eval.data import DataSource
 
 logger = logging.getLogger(__name__)
@@ -644,6 +645,10 @@ class Task(ABC):
 
         # Check if any scorers need async execution
         has_async_scorers = self._has_async_scorers()
+        if context is None and self._get_response_batch_scorers():
+            from olmo_eval.common.execution import ScoringContext
+
+            context = ScoringContext()
 
         if has_async_scorers and context is not None:
             # Run async scoring
@@ -666,17 +671,28 @@ class Task(ABC):
             self._scorers_cache = scorers_by_name
         return self._scorers_cache
 
+    def _get_response_batch_scorers(self) -> tuple[ResponseBatchScorer, ...]:
+        """Return configured ResponseBatchScorer instances, if any."""
+        from olmo_eval.common.scorers.execution import ResponseBatchScorer
+
+        return tuple(s for s in self._get_scorers().values() if isinstance(s, ResponseBatchScorer))
+
     def _has_async_scorers(self) -> bool:
         """Check if any configured scorers require async execution.
 
         This includes ExecutionScorer (sandboxed code), ProcessScorer
-        (CPU-bound subprocess work), and ContextScorer (LLM judges).
+        (CPU-bound subprocess work), ContextScorer (LLM judges), and
+        ResponseBatchScorer (batched response grading).
         """
         if self._has_async_cache is None:
-            from olmo_eval.common.scorers.execution import ContextScorer, ExecutionScorer
+            from olmo_eval.common.scorers.execution import (
+                ContextScorer,
+                ExecutionScorer,
+                ResponseBatchScorer,
+            )
 
             self._has_async_cache = any(
-                isinstance(s, (ExecutionScorer, ContextScorer))
+                isinstance(s, (ExecutionScorer, ContextScorer, ResponseBatchScorer))
                 or getattr(s, "requires_async", False)
                 for s in self._get_scorers().values()
             )
@@ -800,8 +816,10 @@ class Task(ABC):
         from olmo_eval.common.scorers.execution import (
             ContextScorer,
             ExecutionScorer,
+            ResponseBatchScorer,
             SandboxInfrastructureError,
             SandboxRequiredError,
+            ScoringIncompleteError,
         )
 
         execution_env = context.execution_env if context.has_execution_env else None
@@ -824,9 +842,10 @@ class Task(ABC):
         else:
             task_executor = execution_env
 
-        # Separate scorers by type: execution (sandbox), process (CPU), context (LLM judge), sync
+        # Separate scorers by type: execution, process, batch, context, and sync
         execution_scorers: dict[str, ExecutionScorer] = {}
         process_scorers: dict[str, ProcessScorer] = {}
+        batch_scorers: dict[str, ResponseBatchScorer] = {}
         context_scorers: dict[str, ContextScorer] = {}
         sync_scorers: dict[str, Scorer] = {}
         for name, scorer in scorers_by_name.items():
@@ -851,6 +870,8 @@ class Task(ABC):
                         "Configure scoring process pools in HarnessConfig."
                     )
                 process_scorers[name] = scorer
+            elif isinstance(scorer, ResponseBatchScorer):
+                batch_scorers[name] = scorer
             elif isinstance(scorer, ContextScorer):
                 context_scorers[name] = scorer
             else:
@@ -871,9 +892,12 @@ class Task(ABC):
                     dict(enumerate(scores))
                 )
 
-        # Apply async scorers (execution, process, and context) concurrently
+        # Apply async scorers (execution, process, batch, and context) concurrently
         async_scorers_exist = (
-            bool(execution_scorers) or bool(process_scorers) or bool(context_scorers)
+            bool(execution_scorers)
+            or bool(process_scorers)
+            or bool(batch_scorers)
+            or bool(context_scorers)
         )
         if async_scorers_exist:
             # Shared semaphore for sandbox execution — scoped by capability, sized
@@ -888,7 +912,7 @@ class Task(ABC):
                 if sem is not None:
                     exec_semaphore = sem
 
-            # Per-call semaphore for context scorers (LLM judges) — they don't
+            # Per-call semaphore for context / response-batch scorers (LLM judges) — they don't
             # consume sandbox slots so per-call throttling is appropriate.
             ctx_semaphore = asyncio.Semaphore(context.scoring_concurrency)
 
@@ -957,6 +981,82 @@ class Task(ABC):
                 }
                 return ResponseScore(resp_idx, scorer.name, output_scores, output_errors)
 
+            async def score_response_batch(
+                resp_indices: list[int],
+                scorer: ResponseBatchScorer,
+            ) -> list[ResponseScore]:
+                batch_responses = [responses[idx] for idx in resp_indices]
+                try:
+                    async with ctx_semaphore:
+                        batch_scores = await scorer.ascore_batch(batch_responses, context)
+                    if len(batch_scores) != len(resp_indices):
+                        raise ValueError(
+                            f"{scorer.__class__.__name__}.ascore_batch returned "
+                            f"{len(batch_scores)} score(s) for {len(resp_indices)} response(s)"
+                        )
+                    for resp_idx, raw_score in zip(resp_indices, batch_scores, strict=True):
+                        n_outputs = len(responses[resp_idx].outputs)
+                        if isinstance(raw_score, (list, tuple)) and len(raw_score) != n_outputs:
+                            raise ValueError(
+                                f"{scorer.__class__.__name__}.ascore_batch returned "
+                                f"{len(raw_score)} output score(s) for response with "
+                                f"{n_outputs} output(s)"
+                            )
+                except Exception as exc:
+                    error = format_scoring_error(exc, phase="context")
+                    for resp_idx in resp_indices:
+                        instance_id = responses[resp_idx].instance.metadata.get("id", str(resp_idx))
+                        logger.warning(
+                            "Batch scoring failed for instance %s with scorer %s: %s",
+                            instance_id,
+                            scorer.name,
+                            error.get("message", error["type"]),
+                        )
+                        if not responses[resp_idx].outputs:
+                            responses[resp_idx].scoring_error = dict(error)
+                    return [
+                        ResponseScore(
+                            resp_idx,
+                            scorer.name,
+                            dict.fromkeys(range(len(responses[resp_idx].outputs)), None),
+                            dict.fromkeys(range(len(responses[resp_idx].outputs)), error),
+                        )
+                        for resp_idx in resp_indices
+                    ]
+
+                incomplete_error = format_scoring_error(
+                    ScoringIncompleteError(f"{scorer.__class__.__name__} returned no score"),
+                    phase="context",
+                )
+                batch_results: list[ResponseScore] = []
+                for resp_idx, raw_score in zip(resp_indices, batch_scores, strict=True):
+                    n_outputs = len(responses[resp_idx].outputs)
+                    output_scores: dict[int, float | None] = {}
+                    output_errors: dict[int, dict[str, str]] = {}
+                    if isinstance(raw_score, (list, tuple)):
+                        for out_idx, s in enumerate(raw_score):
+                            if s is None:
+                                output_scores[out_idx] = None
+                                output_errors[out_idx] = dict(incomplete_error)
+                            else:
+                                output_scores[out_idx] = float(s)
+                    elif raw_score is None:
+                        for out_idx in range(n_outputs):
+                            output_scores[out_idx] = None
+                            output_errors[out_idx] = dict(incomplete_error)
+                        if n_outputs == 0:
+                            responses[resp_idx].scoring_error = dict(incomplete_error)
+                    else:
+                        val = float(raw_score)
+                        for out_idx in range(n_outputs):
+                            output_scores[out_idx] = val
+                        if n_outputs == 0:
+                            responses[resp_idx].scores[scorer.name] = val
+                    batch_results.append(
+                        ResponseScore(resp_idx, scorer.name, output_scores, output_errors)
+                    )
+                return batch_results
+
             tasks = []
             for resp_idx, response in enumerate(responses):
                 # Add execution scorer tasks
@@ -971,8 +1071,30 @@ class Task(ABC):
                 for scorer in process_scorers.values():
                     tasks.append(score_process(resp_idx, scorer))
 
+            for scorer in batch_scorers.values():
+                buckets: dict[Hashable, list[int]] = {}
+                for resp_idx, response in enumerate(responses):
+                    buckets.setdefault(scorer.batch_key(response), []).append(resp_idx)
+                batch_size = scorer.batch_size
+                for bucket_indices in buckets.values():
+                    if batch_size is None or batch_size <= 0:
+                        tasks.append(score_response_batch(bucket_indices, scorer))
+                    else:
+                        for start in range(0, len(bucket_indices), batch_size):
+                            tasks.append(
+                                score_response_batch(
+                                    bucket_indices[start : start + batch_size], scorer
+                                )
+                            )
+
             # Run all scoring tasks concurrently
-            results = await asyncio.gather(*tasks)
+            raw_results = await asyncio.gather(*tasks)
+            results: list[OutputScore | ResponseScore] = []
+            for item in raw_results:
+                if isinstance(item, list):
+                    results.extend(item)
+                else:
+                    results.append(item)
 
             # Store individual scores in output metadata for pass@k expansion
             # Structure: {resp_idx: {scorer_name: {out_idx: score}}}
