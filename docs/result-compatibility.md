@@ -16,7 +16,7 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
-## 2026-11-23: `unclosed_think` counts traces the chat template opened
+## 2026-11-23: `unclosed_think` counts traces the chat template opened (#588)
 
 - **Affected**: the `generation_counts.unclosed_think` diagnostic of every generation
   task, for models whose chat template ends its generation prompt with `<think>` (the
