@@ -253,6 +253,7 @@ _ANSWER_LEAD_IN = re.compile(
 _JOIN = r"(?:,\s*(?i:and|or)\b|,|/|&|\b(?i:and|or)\b)"
 # A choice letter standing alone, with any emphasis or parentheses around it.
 _CHOICE = r"[*_(]*(?<![A-Za-z])[A-J](?![A-Za-z0-9])[*_)]*"
+_CHOICE_LETTER = re.compile(r"(?<![A-Za-z])[A-J](?![A-Za-z0-9])")
 _PARENTHESIZED_CHOICE = r"[*_]*\([A-J]\)[*_]*"
 # Several choices given as one answer. Parenthesized letters joined together are a list
 # wherever the sentence goes next ("(I) and (J) are both right"). Bare letters are a list
@@ -276,7 +277,10 @@ def names_several_choices(text: str) -> bool:
     if not lead_ins:
         return False
     choices = _SEVERAL_CHOICES.match(text, lead_ins[-1].end())
-    return choices is not None and len(set(re.findall(r"[A-J]", choices.group(0)))) > 1
+    if choices is None:
+        return False
+    # Only the choice letters count: the "A" and "D" of an uppercase "AND" are not choices.
+    return len(set(_CHOICE_LETTER.findall(choices.group(0)))) > 1
 
 
 def _extract_cot_answer_v3(text: str) -> ExtractedAnswer:

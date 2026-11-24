@@ -315,16 +315,20 @@ class HLECalibrationErrorMetric(Metric):
 _STATISTICAL = r"(?:\s+(?:intervals?|bounds?|bands?|limits?|regions?)\b)"
 #: A confidence the model stated itself: the line the system prompt asks for, however it
 #: is laid out ("Confidence: 85%", "Confidence: {90%}", a heading with the number on the
-#: next line, "confidence level - 70", "Confidence is high (90%)"), or a sentence ("I am
-#: 85% confident", "70 percent confidence"). A statistical term such as "the 95%
-#: confidence interval is 3 to 5" is not one.
+#: next line, "confidence level - 70", "Confidence: high (80%)"), or a first-person
+#: sentence ("I am 85% confident", "I have 70 percent confidence"). A statistical
+#: statement is not one: "the 95% confidence interval is 3 to 5", "with 95% confidence
+#: the bound holds". The adjective form is taken at its word, so "we can be 95%
+#: confident that the mean lies in the interval" counts as stated.
+_QUALIFIER = r"(?:(?:very\s+)?(?:high|low|moderate|medium)\s*)?"
 _STATED_CONFIDENCE = re.compile(
     r"(?i)"
-    rf"\bconfidence\b(?!{_STATISTICAL})(?:\s+(?:level|score))?\s*(?:is\s+)?"
-    r"(?:(?:very\s+)?(?:high|low|moderate|medium)\s*)?"
+    rf"\bconfidence\b(?!{_STATISTICAL})(?:\s+(?:level|score))?"
+    rf"[\s*_:=\-–—]*(?:is\s+)?{_QUALIFIER}"
     r"[\s*_:=\-–—({\[]*(?:of\s+|at\s+)?(?:about\s+|around\s+|approximately\s+|~\s*)?\d"
-    r"|\d+(?:\.\d+)?\s*(?:%|percent)\s+"
-    rf"(?:confident\b|sure\b|certain\b|confidence\b(?!{_STATISTICAL}|\s+levels?\b))"
+    r"|\d+(?:\.\d+)?\s*(?:%|percent)\s+(?:confident\b|sure\b|certain\b)"
+    r"|\b(?:I|I['’]m|my|our)\b[^.\n]{0,40}?\d+(?:\.\d+)?\s*(?:%|percent)\s+"
+    rf"confidence\b(?!{_STATISTICAL}|\s+levels?\b)"
 )
 
 

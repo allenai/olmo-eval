@@ -98,6 +98,11 @@ class TestMMLUProSeveralLetters:
             ("Answer: (C) and (E)", True),
             ("The answer is: C or E.", True),
             ("Answer: C OR E.", True),
+            ("The answer is A and B.", True),
+            # The letters of an uppercase join are not choices.
+            ("The answer is A AND A.", False),
+            ("The answer is (A) AND (A).", False),
+            ("Answer: D OR D", False),
             ("Answer: C AND E", True),
             ("The answer is (C) Or (E).", True),
             ("The answer is C, And E.", True),
@@ -180,6 +185,11 @@ class TestHLEStatedConfidence:
             ("### Answer:\n42\n\n### Confidence:\n100%", True),
             ("**Answer:**  \n42\n\n**Confidence:**  \n85%", True),
             ("Confidence is high (90%) based on the task requirements.", True),
+            ("Answer: 42\nConfidence: high (80%)", True),
+            ("My answer comes with 90% confidence.", True),
+            # A statistical statement, not the model's own confidence.
+            ("With 95% confidence the bound holds.\nAnswer: 4", False),
+            ("The bound holds with 95% confidence.\nAnswer: 4", False),
             ("The confidence in this result is strong.\nAnswer: 42", False),
             ("The final answer is \\boxed{2}", False),
             ("Answer: 42\nConfidence: high", False),
