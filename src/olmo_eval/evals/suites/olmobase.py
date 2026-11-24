@@ -2,6 +2,7 @@ import olmo_eval.evals.suites.code  # noqa: F401 – register olmobase:code:v3
 import olmo_eval.evals.suites.mmlu  # noqa: F401 – register MMLU suites
 from olmo_eval.evals.suites.registry import (
     AggregationStrategy,
+    Suite,
     get_suite,
     make_suite,
 )
@@ -328,5 +329,50 @@ make_suite(
         get_suite(f"olmobase:{cluster}:v3")
         for cluster in ("mcqa_stem", "mcqa_non_stem", "gen", "math", "code")
     ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+# =============================================================================
+# OlmoBaseEval easy v3: the BPB clusters average only BPB.
+# =============================================================================
+
+# Of two variants that set metrics, the later one wins, so arc, csqa and piqa
+# ":bpb:olmo3base" score olmo3base's accuracy and olmobase:easy:qa:bpb averaged
+# two accuracies with BPB and skipped csqa. ":olmo3base:bpb" scores BPB.
+make_suite(
+    name="arc:olmo3base:bpb",
+    tasks=("arc_challenge:olmo3base:bpb", "arc_easy:olmo3base:bpb"),
+)
+
+_EASY_QA_BPB_V3_SWAPS: dict[str, str | Suite] = {
+    "arc:bpb:olmo3base": get_suite("arc:olmo3base:bpb"),
+    "csqa:bpb:olmo3base": "csqa:olmo3base:bpb",
+    "piqa:bpb:olmo3base": "piqa:olmo3base:bpb",
+}
+
+make_suite(
+    name="olmobase:easy:qa:rc:v3",
+    tasks=get_suite("olmobase:easy:qa:rc").tasks,
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+make_suite(
+    name="olmobase:easy:qa:bpb:v3",
+    tasks=tuple(
+        _EASY_QA_BPB_V3_SWAPS.get(task.name if isinstance(task, Suite) else task, task)
+        for task in get_suite("olmobase:easy:qa:bpb").tasks
+    ),
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+make_suite(
+    name="olmobase:easy:math:bpb:v3",
+    tasks=get_suite("olmobase:easy:math:bpb").tasks,
+    aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+)
+
+make_suite(
+    name="olmobase:easy:code:bpb:v3",
+    tasks=get_suite("olmobase:easy:code:bpb:v2").tasks,
     aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
 )
