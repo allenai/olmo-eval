@@ -30,6 +30,10 @@ _T = TypeVar("_T")
 class ResponsiveBashSession(BashSession):
     """Keep one pexpect reader per session while other HTTP requests run."""
 
+    # How long an interrupt waits for a job to take the terminal before it
+    # signals the shell itself (a builtin such as ``read`` or a shell loop).
+    shell_interrupt_grace = 0.25
+
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self._operation_lock = asyncio.Lock()
@@ -46,6 +50,64 @@ class ResponsiveBashSession(BashSession):
                 and (allow_shell or foreground != self.shell.pid)
             ):
                 os.killpg(foreground, signal.SIGKILL)
+
+    async def _send_interrupt(self, task: asyncio.Task[Any]) -> None:
+        """Send SIGINT to the action's foreground job, or to the shell if it keeps the terminal.
+
+        A ^C written to the terminal reaches whichever group is in the foreground
+        at that moment. Between two commands of one line that group is the shell.
+        If the shell has already forked the next command, it abandons the line and
+        prints a prompt while the child still takes the terminal and runs, so the
+        next action queues behind it. Signaling the job's group directly avoids
+        that. Bash 4 and later end the rest of the line when its foreground job
+        dies of SIGINT, as they do for a terminal ^C.
+
+        Only one job is signaled. A later job may be swerex's own terminator line,
+        which must run for the action to finish. Returns when the action finishes,
+        a grace period after signaling the job, or after signaling the shell once
+        it has held the terminal for the grace period. The caller then escalates.
+
+        One race remains on the shell path: SIGINT sent to the shell just as it
+        forks after holding the terminal for the whole grace period.
+        """
+        loop = asyncio.get_running_loop()
+        grace = self.shell_interrupt_grace
+        give_up = loop.time() + 2 * grace
+        signaled_at: float | None = None
+        shell_since: float | None = None
+        while not task.done():
+            now = loop.time()
+            if signaled_at is not None:
+                if now - signaled_at >= grace:
+                    return
+            elif now >= give_up:
+                return
+            else:
+                try:
+                    foreground = os.tcgetpgrp(self.shell.child_fd)
+                except (RuntimeError, OSError):
+                    return
+                if foreground > 0 and foreground not in (self.shell.pid, os.getpgrp()):
+                    shell_since = None
+                    try:
+                        os.killpg(foreground, signal.SIGINT)
+                    except OSError:
+                        pass  # The job already exited; wait for the next one.
+                    else:
+                        signaled_at = now
+                elif shell_since is None:
+                    shell_since = now
+                elif now - shell_since >= grace:
+                    # Only the shell held the terminal, so a builtin or shell loop
+                    # is running and only the shell can stop it. A ^C written to
+                    # the terminal would also discard unread input, including the
+                    # terminator line, so signal the shell's group instead.
+                    shell_pid = self.shell.pid
+                    if shell_pid is not None:
+                        with contextlib.suppress(OSError):
+                            os.killpg(shell_pid, signal.SIGINT)
+                    return
+            await asyncio.sleep(0.005)
 
     async def _finish_reader_timeout(self) -> None:
         # Ownership is retained, so a non-shell foreground group still belongs
@@ -91,8 +153,7 @@ class ResponsiveBashSession(BashSession):
             if not task.cancelled() and isinstance(task.exception(), CommandTimeoutError):
                 await self._finish_reader_timeout()
             return
-        with contextlib.suppress(RuntimeError, OSError):
-            self.shell.sendintr()
+        await self._send_interrupt(task)
         try:
             await asyncio.wait_for(asyncio.shield(task), 0.5)
             return

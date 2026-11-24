@@ -1,6 +1,7 @@
 """Persistent shell concurrency and deadline regressions using real pexpect."""
 
 import asyncio
+import contextlib
 
 import httpx
 import pytest
@@ -14,6 +15,38 @@ from swerex.runtime.abstract import (
 )
 
 from olmo_eval.harness.sandbox._http_session import ResponsiveBashSession, ResponsiveSessionRuntime
+
+
+def _notify_on_sigint(monkeypatch, event):
+    """Set ``event`` once the session sends SIGINT to the action's foreground job."""
+    import os
+    import signal
+
+    original_killpg = os.killpg
+
+    def killpg(pgid, sig):
+        original_killpg(pgid, sig)
+        if sig == signal.SIGINT:
+            event.set()
+
+    monkeypatch.setattr(os, "killpg", killpg)
+
+
+async def _start_settled_session() -> ResponsiveBashSession:
+    """Start a session and consume any startup prompt left in the buffer.
+
+    Without a startup file that sets its own prompt, bash prints the inherited
+    prompt and then a second one after the reset, so the first action can match
+    a stale prompt and send its exit-code probe while its command still runs.
+    """
+    session = ResponsiveBashSession(CreateBashSessionRequest(session="test"))
+    await session.start()
+    for _ in range(3):
+        ready = await session.run(BashAction(command="echo warmed-up", timeout=3, check="silent"))
+        if "warmed-up" in ready.output:
+            return session
+    await session.close()
+    raise AssertionError("session did not settle after start")
 
 
 @pytest.mark.anyio
@@ -176,6 +209,140 @@ async def test_interrupt_can_signal_an_active_serialized_reader(tmp_path):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("operation", ["cancel", "interrupt"])
+async def test_interrupt_between_commands_signals_the_next_job_not_the_shell(
+    monkeypatch, tmp_path, operation
+):
+    # A ^C that reaches the shell just after it forks the next command leaves
+    # that command running in the foreground while the shell shows a prompt, so
+    # the next action hangs. Here the shell holds the terminal in `read -t`
+    # when the interrupt arrives, and the interrupt must wait for `sleep`.
+    session = await _start_settled_session()
+    session.shell_interrupt_grace = 30
+    import os
+    import signal
+
+    shell_interrupts = []
+    original_killpg = os.killpg
+
+    def killpg(pgid, sig):
+        if pgid == session.shell.pid and sig == signal.SIGINT:
+            shell_interrupts.append(sig)
+        original_killpg(pgid, sig)
+
+    monkeypatch.setattr(os, "killpg", killpg)
+    monkeypatch.setattr(session.shell, "sendintr", lambda: shell_interrupts.append("^C"))
+    marker = tmp_path / "started"
+    try:
+        task = asyncio.create_task(
+            session.run(
+                BashAction(
+                    command=f": > {marker}; read -t 0.3 _; sleep 30",
+                    timeout=10,
+                    check="silent",
+                )
+            )
+        )
+        async with asyncio.timeout(3):
+            while not marker.exists():
+                await asyncio.sleep(0.01)
+        if operation == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 5)
+        else:
+            await asyncio.wait_for(session.run(BashInterruptAction()), 5)
+            await asyncio.wait_for(task, 1)
+        assert shell_interrupts == []
+        response = await session.run(BashAction(command="echo recovered", timeout=3))
+        assert "recovered" in response.output
+    finally:
+        await session.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("work", ["sleep 30", "while :; do :; done"])
+async def test_interrupt_leaves_the_fallback_terminator_line_alone(tmp_path, work):
+    # bashlex cannot parse `$((...))`, so swerex appends a second line with its
+    # own `sleep 0.1` and an end marker. Only the user's job or the shell's loop
+    # may be interrupted, and a terminal ^C would discard the unread line.
+    session = await _start_settled_session()
+    marker = tmp_path / "started"
+    try:
+        task = asyncio.create_task(
+            session.run(
+                BashAction(command=f": > {marker}; x=$((1)); {work}", timeout=10, check="silent")
+            )
+        )
+        async with asyncio.timeout(3):
+            while not marker.exists():
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(session.run(BashInterruptAction()), 3)
+        await asyncio.wait_for(task, 1)
+        response = await session.run(BashAction(command="echo recovered", timeout=3))
+        assert "recovered" in response.output
+    finally:
+        await session.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("command", ["read -r _", "while :; do :; done"])
+async def test_interrupt_stops_a_shell_builtin_that_keeps_the_terminal(tmp_path, command):
+    session = await _start_settled_session()
+    marker = tmp_path / "started"
+    try:
+        task = asyncio.create_task(
+            session.run(
+                BashAction(command=f"touch {marker}; {command}", timeout=10, check="silent")
+            )
+        )
+        async with asyncio.timeout(3):
+            while not marker.exists():
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(session.run(BashInterruptAction()), 3)
+        await asyncio.wait_for(task, 1)
+        response = await session.run(BashAction(command="echo recovered", timeout=3))
+        assert "recovered" in response.output
+    finally:
+        await session.close()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("operation", ["cancel", "interrupt"])
+async def test_interrupt_escalates_past_a_loop_of_jobs_that_ignore_sigint(tmp_path, operation):
+    # Each `sleep` is a new foreground group, so SIGINT never holds one group
+    # for the grace period and the shell never keeps the terminal for it either.
+    session = await _start_settled_session()
+    marker = tmp_path / "started"
+    task = asyncio.create_task(
+        session.run(
+            BashAction(
+                command=f"trap '' INT; touch {marker}; while :; do sleep 0.05; done",
+                timeout=None,
+                check="silent",
+            )
+        )
+    )
+    try:
+        async with asyncio.timeout(3):
+            while not marker.exists():
+                await asyncio.sleep(0.01)
+        if operation == "cancel":
+            task.cancel()
+        else:
+            await asyncio.wait_for(session.run(BashInterruptAction()), 4)
+        # asyncio.wait does not cancel the task on timeout, unlike wait_for.
+        done, _ = await asyncio.wait({task}, timeout=4)
+        assert task in done
+    finally:
+        task.cancel()
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await task
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(session.close(), 4)
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("operation", ["cancel", "interrupt", "close"])
 async def test_ignored_interrupt_without_deadline_does_not_lock_session(tmp_path, operation):
     session = ResponsiveBashSession(CreateBashSessionRequest(session="test"))
@@ -311,7 +478,6 @@ async def test_deadline_during_interrupt_grace_keeps_queued_action_safe(
     readers = 0
     peak_readers = 0
     original_expect = session.shell.expect
-    original_sendintr = session.shell.sendintr
 
     def expect(pattern, timeout=-1, **kwargs):
         nonlocal readers, peak_readers
@@ -342,12 +508,8 @@ async def test_deadline_during_interrupt_grace_keeps_queued_action_safe(
             with readers_lock:
                 readers -= 1
 
-    def sendintr():
-        original_sendintr()
-        interrupted.set()
-
     monkeypatch.setattr(session.shell, "expect", expect)
-    monkeypatch.setattr(session.shell, "sendintr", sendintr)
+    _notify_on_sigint(monkeypatch, interrupted)
     if operation == "late-cleanup":
         original_stop = session._stop_active
 
@@ -489,7 +651,6 @@ async def test_failed_prompt_drain_terminates_compound_action(
     draining = threading.Event()
     release = threading.Event()
     original_expect = session.shell.expect
-    original_sendintr = session.shell.sendintr
 
     def expect(pattern, timeout=-1, **kwargs):
         if timeout == 0.1:
@@ -499,12 +660,8 @@ async def test_failed_prompt_drain_terminates_compound_action(
             assert release.wait(3)
         return original_expect(pattern, timeout=timeout, **kwargs)
 
-    def sendintr():
-        original_sendintr()
-        interrupted.set()
-
     monkeypatch.setattr(session.shell, "expect", expect)
-    monkeypatch.setattr(session.shell, "sendintr", sendintr)
+    _notify_on_sigint(monkeypatch, interrupted)
     action = asyncio.create_task(
         session.run(
             BashAction(
