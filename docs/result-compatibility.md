@@ -45,8 +45,10 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   job on any scoring error. Independently, the older `execute_code` path could
   return a failed execution result for an argument-size error instead of raising:
   that became a zero with `execution_result.error` but no `scoring_errors` flag.
-  The original five-pool600 HumanEval+ predictions contain20such zeros out of164
-  examples. Do not infer historical denominator handling from an error label or
+  Each of the five originally completed Tiny mixing-study HumanEval+ panels
+  contains 20 such zeros out of 164 examples, including five-pool600 (Beaker
+  dataset `01M86MHP21N6ASCKVGZGD0SW71`,
+  `evaluation/humaneval_plus_chat_pass_at_1-predictions.json`). Do not infer historical denominator handling from an error label or
   successful job status alone. With this fix, an ordinary solution time-limit failure is a
   scored zero and stays in the denominator; genuine infrastructure failures keep
   the runner's existing failure handling.
