@@ -252,6 +252,52 @@ def test_finalize_task_attaches_counts_after_stripping() -> None:
     assert result.generation_counts["cap_hit"] == 1
 
 
+def test_finalize_task_leaves_an_output_without_evidence_unscored() -> None:
+    """As the per-response path does: the instance is unscored, the task still finishes."""
+    config = TaskConfig(
+        name="auto",
+        data_source="test/data",
+        metrics=(AccuracyMetric(),),
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
+
+    class _AutoTask(_StubTask):
+        def __init__(self) -> None:
+            self._task = get_task(SPEC)
+            self._task.config = config
+            self.config = config
+
+        def strip_thinking_traces(self, responses: list[Response]) -> None:
+            self._task.strip_thinking_traces(responses)
+
+    answered = _response(("plan</think>Answer.", "stop"))
+    no_evidence = _response(("an answer, or a trace", "stop"))
+    no_evidence.outputs[0].metadata["prompt_opens_think"] = True
+    tracker = TaskTracker(spec="auto", model_name="m", task=_AutoTask(), total_instances=2)  # type: ignore[arg-type]
+    tracker.responses = {0: answered, 1: no_evidence}
+
+    result = asyncio.run(finalize_task(tracker))
+
+    assert result.instances_unscored == 1
+    assert result.metrics == CLEAN_METRICS
+    error = no_evidence.outputs[0].metadata["scoring_errors"]["__response__"]
+    assert error["type"] == "ScoringIncompleteError"
+    assert no_evidence.outputs[0].text == "an answer, or a trace"
+
+
+def test_prepared_requests_ask_for_the_record_only_when_the_task_reads_it() -> None:
+    from olmo_eval.runners.asynq.preparation import _format_request
+
+    instance = Instance(question="q", gold_answer="a")
+    plain = get_task(SPEC)
+    asking = get_task(SPEC, {"strip_unclosed_thinking": True, "thinking_prefilled": "auto"})
+
+    assert _format_request(plain, instance).record_thinking is False
+    assert _format_request(plain, instance) == plain.format_request(instance)
+    assert _format_request(asking, instance).record_thinking is True
+
+
 def test_task_completion_line_reports_counts(caplog) -> None:
     caplog.set_level(logging.INFO)
 
