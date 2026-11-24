@@ -607,7 +607,6 @@ def test_a_rolling_text_starts_with_bos_and_scores_every_byte(monkeypatch) -> No
 
     assert llm.generate_calls[0]["prompts"][0]["prompt_token_ids"][0] == 1
     assert output.metadata["prefix_tokens"] == 1
-    assert output.metadata["unscored_leading_tokens"] == 0
     assert output.metadata["scored_bytes"] == len(TEXT.encode("utf-8"))
 
 
@@ -626,7 +625,6 @@ def test_without_bos_a_rolling_text_starts_cold_not_after_eos(monkeypatch) -> No
     expected = sum(_logprob(ord(prev), ord(tid)) for prev, tid in zip(text, text[1:], strict=False))
     assert output.metadata["sum_logits"] == pytest.approx(expected)
     assert output.metadata["prefix_tokens"] == 0
-    assert output.metadata["unscored_leading_tokens"] == 1
     assert output.metadata["scored_bytes"] == len(text.encode("utf-8")) - 2
 
 

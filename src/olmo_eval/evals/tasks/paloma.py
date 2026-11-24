@@ -3,8 +3,8 @@
 Each document is scored on its own as one rolling request, so a document longer
 than ``max_length`` is scored in full in windows of ``max_length``. The tasks
 require ``max_length`` so the window is part of the task hash. A document starts
-with the tokenizer's own prefix: BOS if the tokenizer adds one, else nothing, in
-which case its first token is context and its bytes are not counted. A source is
+with whatever the tokenizer puts in front (BOS or nothing); with nothing, its first
+token is context and not scored. A source is
 byte-weighted over all its documents; the paper instead averages over a source's
 domains, which the saved ``subdomain`` lets you recompute.
 """
@@ -59,8 +59,7 @@ class PalomaBase(Task):
     """One Paloma source, each document scored as raw text in full."""
 
     split = Split.VALIDATION
-    #: Rolling texts start with the tokenizer's own prefix, not BOS-or-EOS. Before
-    #: this, tokenizers without BOS scored every document after an EOS.
+    #: Rolling texts start with the tokenizer's own prefix (result-compatibility.md).
     task_settings = {"rolling_prefix": "tokenizer"}
     metrics = (BPBMetricByteAvg(),)
     primary_metric = BPBMetricByteAvg()

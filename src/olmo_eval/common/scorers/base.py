@@ -228,15 +228,10 @@ class SQuADF1Scorer(Scorer):
         return max(_compute_squad_f1(pred, ref) for ref in all_answers)
 
 
-#: Output metadata key for the UTF-8 bytes the logprobs cover when that is less than
-#: the whole text: a rolling text scored from a cold start leaves its first token
-#: unscored, so bits per byte must not count that token's bytes.
-SCORED_BYTES_KEY = "scored_bytes"
-
-
 def scored_bytes(output: LMOutput, text: str | None) -> int:
-    """Bytes of ``text`` the output's logprobs cover: all of them unless the provider said."""
-    scored = (output.metadata or {}).get(SCORED_BYTES_KEY)
+    """Bytes of ``text`` the logprobs cover: all of them, unless the provider set
+    ``scored_bytes`` (a rolling text that leaves its first token unscored)."""
+    scored = (output.metadata or {}).get("scored_bytes")
     if scored is not None:
         return int(scored)
     return len(text.encode("utf-8")) if text else 0
