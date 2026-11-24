@@ -479,6 +479,22 @@ class _FrontierScience(JudgedTask, ABC):
             )
         return responses
 
+    def _record_no_answer(self, output: LMOutput, scores: dict[str, float]) -> float | None:
+        """Score an output with no visible answer 0 without the judge, in the ``v2`` variants.
+
+        Returns None for the original specs, which send the judge whatever text there
+        is, and for an output that has an answer.
+        """
+        if not self.config.strip_unclosed_thinking or strip_reasoning(output.text):
+            return None
+        output.metadata["frontierscience_judge_parse_error"] = False
+        judge_result = {
+            "scorer": FRONTIERSCIENCE_SCORER_NAME,
+            "no_visible_answer": True,
+            "parse_error": False,
+        }
+        return self._record_judgement(output, judge_result, dict.fromkeys(scores, 0.0))
+
     def _record(
         self,
         output: LMOutput,
@@ -528,6 +544,9 @@ class FrontierScienceOlympiad(_FrontierScience):
         output: LMOutput,
         judge: Judge,
     ) -> float:
+        unanswered = self._record_no_answer(output, {"accuracy": 0.0})
+        if unanswered is not None:
+            return unanswered
         answer = output.extracted_answer
         if not isinstance(answer, str):
             answer = extract_final_answer(output.text)
@@ -691,6 +710,9 @@ class FrontierScienceResearch(_FrontierScience):
         output: LMOutput,
         judge: Judge,
     ) -> float:
+        unanswered = self._record_no_answer(output, {"success_rate": 0.0, "rubric_score": 0.0})
+        if unanswered is not None:
+            return unanswered
         answer = output.extracted_answer
         if not isinstance(answer, str):
             answer = strip_reasoning(output.text)
@@ -733,4 +755,19 @@ register_variant(
     "paper",
     sampling_params=replace(_RESEARCH_SAMPLING, temperature=1.0, num_samples=30),
 )
+# ``v2`` (``frontierscience_olympiad:v2``): a reasoning trace that never closed is no
+# answer, including a trace the chat template opened, and an output with no visible
+# answer scores 0 without a judge call. The original specs send such a trace to the
+# judge as the answer.
+for _judged_task in (
+    "frontierscience_olympiad",
+    "frontierscience_olympiad:verified",
+    "frontierscience_research",
+):
+    register_variant(
+        _judged_task,
+        "v2",
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
 register_variant("frontierscience_olympiad:mc", "olmo3base")

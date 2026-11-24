@@ -69,6 +69,13 @@ Metrics:
   over individual outputs, in bins of 100 as in the official scorer; lower is
   better. The official code leaves its highest-confidence bin out of the sum; this
   metric keeps it, hence the distinct name.
+- ``calibration_error_stated`` and ``confidence_stated_rate``, in the ``v2`` variants
+  (``hle:text:verified:v2``) in place of ``calibration_error_all_bins``: the same RMS
+  calibration error, over only the outputs whose response states a confidence, and the
+  share of judged outputs that do. ``calibration_error_all_bins`` counts every output
+  without one at 100%: a response cut off at the token limit, and a finished answer
+  with no confidence line. Where those are common it reports little more than one
+  minus the accuracy. Each output's ``judge_result`` records ``confidence_stated``.
 - ``truncation_rate``: share of questions with no complete response, because
   generation hit the token limit or the server returned nothing; lower is better.
   These questions already count as wrong in ``accuracy``; a high rate means the
@@ -103,7 +110,7 @@ from olmo_eval.common.types import (
     Split,
 )
 from olmo_eval.data import DataSource
-from olmo_eval.evals.tasks.common import OutputScoreAggregation, register
+from olmo_eval.evals.tasks.common import OutputScoreAggregation, register, register_variant
 from olmo_eval.evals.tasks.common.judge import (
     JudgedScoreMetric,
     JudgedTask,
@@ -304,6 +311,87 @@ class HLECalibrationErrorMetric(Metric):
         return "proportion"
 
 
+#: A confidence the model stated itself, as the system prompt asks ("Confidence: 85%").
+_STATED_CONFIDENCE = re.compile(r"(?i)\bconfidence\b[^\n\d]{0,40}\d")
+
+
+def states_confidence(answer: str) -> bool:
+    """Whether a response states a confidence, so the judge had one to extract."""
+    return _STATED_CONFIDENCE.search(answer) is not None
+
+
+def _stated_confidences(responses: Sequence[Response]) -> tuple[list[float], list[float], int]:
+    """Confidence and correctness of the outputs that stated a confidence, and the output count."""
+    confidences: list[float] = []
+    correct: list[float] = []
+    total = 0
+    for response in responses:
+        for output in response.outputs:
+            metadata = output.metadata or {}
+            if "score:confidence" not in metadata or "score:accuracy" not in metadata:
+                continue
+            total += 1
+            judge_result = metadata.get("judge_result")
+            if isinstance(judge_result, dict) and judge_result.get("confidence_stated"):
+                confidences.append(float(metadata["score:confidence"]))
+                correct.append(float(metadata["score:accuracy"]))
+    return confidences, correct, total
+
+
+@dataclass(frozen=True)
+class HLEStatedCalibrationErrorMetric(Metric):
+    """RMS calibration error over the outputs that stated a confidence; lower is better.
+
+    For the ``v2`` variants. ``calibration_error_all_bins`` gives 100% confidence to
+    every output that stated none: a response cut off at the token limit, and a finished
+    answer without a confidence line, which the judge prompt says to read as 100. Those
+    are not confidences the model expressed, and where they are common the metric
+    reports little more than one minus the accuracy. This one leaves them out;
+    :class:`HLEConfidenceStatedRateMetric` says how many outputs remain. The value for
+    each remaining output is the confidence the judge extracted. With none it is 0.0.
+    """
+
+    name: str = "calibration_error_stated"
+    scorer: type[Scorer] | Scorer = HLEScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        confidences, correct, _ = _stated_confidences(responses)
+        return calibration_error(confidences, correct)
+
+    def supports_scorer_fallback(self) -> bool:
+        return False
+
+    def higher_is_better(self) -> bool:
+        return False
+
+    def display_format(self) -> str:
+        return "percentage"
+
+    def metric_unit(self) -> str:
+        return "proportion"
+
+
+@dataclass(frozen=True)
+class HLEConfidenceStatedRateMetric(Metric):
+    """Share of judged outputs that stated a confidence, the ones calibration is read from."""
+
+    name: str = "confidence_stated_rate"
+    scorer: type[Scorer] | Scorer = HLEScorer
+
+    def compute(self, responses: Sequence[Response]) -> float:
+        confidences, _, total = _stated_confidences(responses)
+        return len(confidences) / total if total else 0.0
+
+    def supports_scorer_fallback(self) -> bool:
+        return False
+
+    def display_format(self) -> str:
+        return "percentage"
+
+    def metric_unit(self) -> str:
+        return "proportion"
+
+
 @dataclass(frozen=True)
 class HLETruncationRateMetric(TruncationRateMetric):
     """Share of questions with no complete response; lower is better."""
@@ -329,6 +417,11 @@ HLE_METRICS = (
         for answer_type, suffix in HLE_ANSWER_TYPES.items()
     ),
 )
+# The ``v2`` metrics: calibration read only from the outputs that stated a confidence.
+HLE_METRICS_V2 = tuple(
+    HLEStatedCalibrationErrorMetric() if isinstance(metric, HLECalibrationErrorMetric) else metric
+    for metric in HLE_METRICS
+) + (HLEConfidenceStatedRateMetric(),)
 
 
 class _HLE(JudgedTask):
@@ -388,8 +481,9 @@ class _HLE(JudgedTask):
             # Nothing finished to grade. Score it wrong at 100% confidence, as the judge
             # prompt directs for a response that states no confidence.
             verdict = JudgeVerdict(correct=False, confidence=1.0, extracted_final_answer=None)
-            judge_result["no_final_response"] = True
+            judge_result["no_final_response"] = no_final_response = True
         else:
+            no_final_response = False
             prompt = HLE_JUDGE_PROMPT.format(
                 question=response.instance.question,
                 response=answer,
@@ -399,6 +493,10 @@ class _HLE(JudgedTask):
                 output, judge, prompt, parse_judge_reply, judge_result
             )
 
+        if any(isinstance(m, HLEStatedCalibrationErrorMetric) for m in self.config.metrics):
+            # For the ``v2`` metrics: False when the confidence below is the 100% that a
+            # missing one is read as.
+            judge_result["confidence_stated"] = not no_final_response and states_confidence(answer)
         judge_result.update(
             correct=verdict.correct,
             confidence=verdict.confidence,
@@ -437,3 +535,17 @@ class HLETextVerified(_HLE):
         if record.get("Verified_Classes", HLE_VERIFIED_GOLD_CLASS) != HLE_VERIFIED_GOLD_CLASS:
             return None
         return super().process_doc(record, index)
+
+
+# ``v2`` (``hle:text:verified:v2``): calibration is read from the outputs that stated a
+# confidence (``calibration_error_stated``, with ``confidence_stated_rate``), and a
+# reasoning trace that never closed is no response whatever stopped it, including a
+# trace the chat template opened. Accuracy is otherwise scored as in the original specs.
+for _hle_task in ("hle:text", "hle:text:verified"):
+    register_variant(
+        _hle_task,
+        "v2",
+        metrics=HLE_METRICS_V2,
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )

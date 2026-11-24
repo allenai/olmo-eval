@@ -228,6 +228,16 @@ FRONTIERSCIENCE = make_suite(
     description="FrontierScience expert-level scientific reasoning (olympiad + research tracks).",
 )
 
+FRONTIERSCIENCE_V2 = make_suite(
+    "frontierscience:v2",
+    tuple(f"{task}:v2" for task in _FRONTIERSCIENCE_TASKS),
+    aggregation=AggregationStrategy.DISPLAY_ONLY,
+    description=(
+        "FrontierScience (olympiad + research tracks) with the v2 scoring: a response with "
+        "no visible answer scores 0 without a judge call."
+    ),
+)
+
 HLE_TEXT = make_suite(
     "hle_text",
     ("hle:text", "hle:text:verified"),

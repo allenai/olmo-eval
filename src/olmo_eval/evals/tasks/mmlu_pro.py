@@ -244,6 +244,42 @@ def _extract_cot_letter(text: str) -> str:
     return _extract_cot_answer(text).answer
 
 
+# The lead-in of a final answer statement, up to where the answer starts.
+_ANSWER_LEAD_IN = re.compile(r"(?i)\banswer\s+is\b:?[^\S\n]*[*_]*[^\S\n]*")
+# Several choices given as one answer: a list in one pair of parentheses ("(C, E)",
+# "(A or B)") or parenthesized letters joined together ("(I) and (J)", "(A), (C)").
+_JOIN = r"(?:,\s*(?:and|or)\b|,|/|&|\band\b|\bor\b)"
+_SEVERAL_CHOICES = re.compile(
+    rf"\(\s*[A-J]\s*(?:{_JOIN}\s*[A-J]\s*)+\)|\([A-J]\)(?:\s*{_JOIN}\s*\([A-J]\))+"
+)
+
+
+def names_several_choices(text: str) -> bool:
+    """Whether the last "answer is ..." statement in ``text`` gives more than one letter.
+
+    Each question has one correct choice, so "the answer is (C, E)" is not an answer to
+    it. Only an explicit list that starts the answer counts: letters mentioned later in
+    the sentence ("the answer is (B), not (C)") do not.
+    """
+    lead_ins = list(_ANSWER_LEAD_IN.finditer(text))
+    if not lead_ins:
+        return False
+    choices = _SEVERAL_CHOICES.match(text, lead_ins[-1].end())
+    return choices is not None and len(set(re.findall(r"[A-J]", choices.group(0)))) > 1
+
+
+def _extract_cot_answer_v2(text: str) -> ExtractedAnswer:
+    """:func:`_extract_cot_answer`, except that an answer naming several letters is none."""
+    visible = extract_think_answer(text or "") or ""
+    if names_several_choices(visible):
+        return ExtractedAnswer("", 0.0)
+    return _extract_cot_answer(text)
+
+
+def _extract_cot_letter_v2(text: str) -> str:
+    return _extract_cot_answer_v2(text).answer
+
+
 @dataclass(frozen=True, slots=True)
 class MMLUProCoTExactMatchScorer(Scorer):
     """Case-insensitive exact match on the extracted answer letter."""
@@ -260,6 +296,22 @@ class MMLUProCoTExactMatchScorer(Scorer):
 
 
 _COT_ACCURACY = AccuracyMetric(name="exact_match", scorer=MMLUProCoTExactMatchScorer)
+
+
+@dataclass(frozen=True, slots=True)
+class MMLUProCoTSingleAnswerScorer(Scorer):
+    """Exact match on the extracted letter; an answer naming several letters is wrong."""
+
+    name: str = "exact_match"
+
+    def score(self, instance: Instance, output: LMOutput) -> float:
+        answer, format_correct = _extract_cot_answer_v2(output.text or "")
+        output.metadata["answer_format_correct"] = format_correct
+        gold = str(instance.gold_answer or "")
+        return 1.0 if answer.upper() == gold.upper() else 0.0
+
+
+_COT_ACCURACY_V2 = AccuracyMetric(name="exact_match", scorer=MMLUProCoTSingleAnswerScorer)
 
 
 class MMLUProCoTTask(MMLUProTask):
@@ -289,7 +341,8 @@ class MMLUProCoTTask(MMLUProTask):
         )
 
     def extract_answer(self, output: LMOutput) -> str | None:
-        return _extract_cot_letter(output.text or "") or None
+        extractor = self.config.answer_extractor or _extract_cot_letter
+        return extractor(output.text or "") or None
 
     def format_request(self, instance: Instance) -> LMRequest:
         formatter = self.config.formatter
@@ -356,3 +409,16 @@ for _category in MMLU_PRO_CATEGORIES:
         },
     )
     register(f"{_name}:cot")(_cot_cls)
+    # ``mmlu_pro_<category>:cot:v2``. A reasoning trace that never closed is no answer:
+    # ``cot`` runs its extraction cascade over such a trace and credits whichever option
+    # letter (or the word "a") it mentions last. An answer naming several letters is no
+    # answer either, where ``cot`` credits the first of them.
+    register_variant(
+        f"{_name}:cot",
+        "v2",
+        metrics=(_COT_ACCURACY_V2,),
+        primary_metric=_COT_ACCURACY_V2,
+        answer_extractor=_extract_cot_letter_v2,
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )

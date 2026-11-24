@@ -561,3 +561,14 @@ register_variant(
     primary_metric=OmniscienceIndexMetric(scorer=_JUDGE_SCORER),
     required_secrets=("OPENAI_API_KEY",),
 )
+
+# Stack on ``judge`` (``omniscience:judge:v2``). A reasoning trace that never closed is
+# no answer, including a trace the chat template opened, which carries no ``<think>``
+# for ``extract_final_answer`` to see. It is graded NOT_ATTEMPTED without a judge call,
+# where ``judge`` sends the trace to the judge as the answer.
+register_variant(
+    "omniscience",
+    "v2",
+    strip_unclosed_thinking=True,
+    thinking_prefilled="auto",
+)

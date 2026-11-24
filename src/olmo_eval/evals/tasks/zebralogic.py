@@ -358,3 +358,15 @@ for _task_name in ("zebralogic", "zebralogic_easy", "zebralogic_hard"):
             top_p=0.95,
         ),
     )
+    # Stack on ``chat`` (``zebralogic:chat:v2``). The solution is parsed only from the
+    # text after the reasoning trace, and a trace that never closed has no solution.
+    # Without this the upstream parser scans the trace too: one unmatched ``{`` there
+    # keeps it from ever completing the final JSON, and a JSON draft inside an
+    # unfinished trace counts as a parsed solution.
+    register_variant(
+        _task_name,
+        "v2",
+        strip_thinking=True,
+        strip_unclosed_thinking=True,
+        thinking_prefilled="auto",
+    )
