@@ -623,8 +623,16 @@ use a provider's native Harmony reasoning parser before evaluating.
 
 Generation diagnostics count outputs, including each sample of an instance.
 `cap_hit` counts known `length` finish reasons and is a lower bound when
-`finish_reason_unknown` is nonzero. `unclosed_think` detects emitted `<think>`
-tags without a closing tag in the original generation. `empty` counts empty
+`finish_reason_unknown` is nonzero. `unclosed_think` counts reasoning traces that
+never closed in the original generation: a `<think>` tag without a closing tag, or,
+when the chat template itself opens the trace, a generation the provider has evidence
+never produced `</think>`. The SGLang and vLLM providers record on each output whether
+the prompt opened a trace (`prompt_opens_think`) and whether it closed (`think_closed`,
+from the text or the generated token ids; absent when the provider has no evidence).
+Both are saved in the predictions file. The vLLM server has to be asked for them, so
+it records them only for tasks that read them (`thinking_prefilled="auto"`); every
+other request is sent as before. Outputs without evidence, and runs saved before the
+providers recorded it, count only emitted tags. `empty` counts empty
 scoring text and excludes tool calls. Tasks that strip or transform text inside
 extraction, without changing `LMOutput.text`, set
 `output.metadata[SCORING_TEXT_EMPTY_KEY]` from that scoring text before parsing;

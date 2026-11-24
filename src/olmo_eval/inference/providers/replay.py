@@ -9,6 +9,8 @@ from typing import Any
 
 from olmo_eval.common.types import (
     CONTEXT_CUT_TOKENS_KEY,
+    PROMPT_OPENS_THINK_KEY,
+    THINK_CLOSED_KEY,
     LMOutput,
     LMRequest,
     RequestType,
@@ -29,6 +31,8 @@ _METADATA_FIELDS = (
     "text_with_special_tokens",
     "response_parser_error",
     CONTEXT_CUT_TOKENS_KEY,
+    PROMPT_OPENS_THINK_KEY,
+    THINK_CLOSED_KEY,
 )
 
 
@@ -85,10 +89,26 @@ class ReplayProvider(InferenceProvider):
     generations; a prompt saved by two files (two configurations of a task) is rejected.
     Requests with images or tools fail too: the saved files keep neither image
     identities nor native tool calls.
+
+    ``prompt_opens_think`` is for runs saved before providers recorded whether the
+    rendered prompt opened a ``<think>`` trace and whether that trace closed. Set it only
+    when that model's chat template did open one and the run's provider left ``</think>``
+    in the text of a closed trace (inline SGLang with the Olmo tokenizers does; a server
+    with a reasoning parser does not). Every replayed output that saved no such record
+    is then marked as starting inside a trace, closed if and only if its text holds
+    ``</think>``. Outputs that saved their own record keep it.
     """
 
-    def __init__(self, model_name: str = "replay", predictions: str = "") -> None:
+    def __init__(
+        self,
+        model_name: str = "replay",
+        predictions: str = "",
+        prompt_opens_think: bool | str = False,
+    ) -> None:
         super().__init__(model_name)
+        if isinstance(prompt_opens_think, str):
+            prompt_opens_think = prompt_opens_think.strip().lower() in {"true", "1"}
+        self._prompt_opens_think = prompt_opens_think
         if not predictions:
             raise ValueError("The replay provider needs provider.predictions=<file or directory>")
         root = Path(predictions)
@@ -142,7 +162,13 @@ class ReplayProvider(InferenceProvider):
                 f"saved {len(queue[0])} samples for this prompt, the task asks for {num_samples}"
             )
         else:
-            return [_replayed_output(saved) for saved in queue.popleft()]
+            outputs = [_replayed_output(saved) for saved in queue.popleft()]
+            if self._prompt_opens_think:
+                for output in outputs:
+                    if PROMPT_OPENS_THINK_KEY not in output.metadata:
+                        output.metadata[PROMPT_OPENS_THINK_KEY] = True
+                        output.metadata[THINK_CLOSED_KEY] = "</think>" in output.text
+            return outputs
         return [LMOutput(text="", metadata={REQUEST_ERROR_KEY: f"replay: {error}"})]
 
     def generate(

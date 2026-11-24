@@ -8,7 +8,14 @@ from .answer_format import (
 from .code import extract_code, extract_code_before_fence, indent_code
 from .math import MathExtractor, extract_math_answer, is_equiv, normalize_final_answer
 from .mcq import ANSWER_LINE_PATTERN, extract_mcq_answer
-from .reasoning import extract_think_answer, extract_think_answer_only
+from .reasoning import (
+    TraceState,
+    extract_think_answer,
+    extract_think_answer_only,
+    trace_state,
+    trace_unfinished,
+    visible_answer,
+)
 from .sanitize import sanitize_code
 
 __all__ = [
@@ -27,4 +34,8 @@ __all__ = [
     "sanitize_code",
     "extract_think_answer",
     "extract_think_answer_only",
+    "TraceState",
+    "trace_state",
+    "trace_unfinished",
+    "visible_answer",
 ]

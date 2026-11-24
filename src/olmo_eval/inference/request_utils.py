@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -11,6 +11,59 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _DROPPED_SYSTEM_WARNED: list[bool] = []
+
+
+def prompt_opens_think(rendered_prompt: str) -> bool:
+    """Whether a rendered prompt ends by opening a ``<think>`` trace.
+
+    A chat template may end its generation prompt with ``<think>``. The generation then
+    starts inside the trace and has no opening tag, so providers record this on each
+    output under ``PROMPT_OPENS_THINK_KEY`` for scoring to tell an unfinished trace from
+    an answer.
+    """
+    return rendered_prompt.rstrip().endswith("<think>")
+
+
+THINK_CLOSE = "</think>"
+
+
+def think_close_token_id(tokenizer: Any) -> int | None:
+    """The id of ``</think>`` when ``tokenizer`` holds the tag as one token, else None.
+
+    A single-token tag can be missing from decoded text (a decoder that skips special
+    tokens drops it), so only the generated ids show whether it was produced. A tag that
+    is ordinary text spans several tokens and always decodes into the text.
+    """
+    for vocabulary in ("get_added_vocab", "get_vocab"):
+        getter = getattr(tokenizer, vocabulary, None)
+        if not callable(getter):
+            continue
+        try:
+            token_id = getter().get(THINK_CLOSE)
+        except (AttributeError, TypeError):
+            continue
+        if isinstance(token_id, int) and not isinstance(token_id, bool):
+            return token_id
+    return None
+
+
+def think_closed(
+    text: str, token_ids: Sequence[int] | None, close_token_id: int | None
+) -> bool | None:
+    """Whether a generation that started inside a trace closed it, or None without evidence.
+
+    ``</think>`` in the text is evidence that it closed. Without it, the generated ids
+    decide when the tag is one token. When it is not one token it is plain text that
+    decoding cannot drop, so its absence from the text is evidence that the trace stayed
+    open.
+    """
+    if THINK_CLOSE in text:
+        return True
+    if close_token_id is None:
+        return False
+    if token_ids is None:
+        return None
+    return close_token_id in token_ids
 
 
 def chat_messages_for_request(request: LMRequest) -> tuple[dict, ...]:

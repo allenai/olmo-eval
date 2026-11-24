@@ -17,12 +17,25 @@ from jinja2 import TemplateError
 
 from olmo_eval.common.images import resolve_images
 from olmo_eval.common.logging import get_logger
-from olmo_eval.common.types import LMOutput, LMRequest, LogProbEntry, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    PROMPT_OPENS_THINK_KEY,
+    THINK_CLOSED_KEY,
+    LMOutput,
+    LMRequest,
+    LogProbEntry,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.base import InferenceProvider
 from olmo_eval.inference.errors import CONTEXT_OVERFLOW_KEY, REQUEST_ERROR_KEY
 from olmo_eval.inference.hf_cache import refresh_hf_cache
 from olmo_eval.inference.providers.sglang_profiles import prepare_profile
-from olmo_eval.inference.request_utils import chat_messages_for_request
+from olmo_eval.inference.request_utils import (
+    chat_messages_for_request,
+    prompt_opens_think,
+    think_close_token_id,
+    think_closed,
+)
 
 logger = get_logger(__name__)
 
@@ -245,6 +258,8 @@ class SGLangProvider(InferenceProvider):
                 if type(value) is int and value > 0:
                     self.profile_report[key] = value
         self._closed = False
+        self._think_close_id: int | None = None
+        self._think_close_id_known = False
         self._capacity_checked = False
         self._previous_batch: tuple[int, int, int, int] | None = None
         self._loop_lock = threading.Lock()
@@ -290,6 +305,13 @@ class SGLangProvider(InferenceProvider):
             raise NotImplementedError("Image requests require enable_multimodal=True")
         if request.request_type == RequestType.CHAT and not request.messages:
             raise ValueError("CHAT requests require messages")
+
+    def _think_close_token_id(self) -> int | None:
+        """The id of ``</think>`` when the tokenizer holds it as one token, looked up once."""
+        if not self._think_close_id_known:
+            self._think_close_id = think_close_token_id(self.get_tokenizer())
+            self._think_close_id_known = True
+        return self._think_close_id
 
     def _format_prompt(self, request: LMRequest) -> str:
         self._validate_request(request)
@@ -356,9 +378,12 @@ class SGLangProvider(InferenceProvider):
                 "prompt_format": self.prompt_format,
             }
         prompt = self._format_prompt(request)
+        # The generation starts inside a trace the prompt opened, with no opening tag.
+        recorded = {PROMPT_OPENS_THINK_KEY: True} if prompt_opens_think(prompt) else {}
         if self._add_bos_token is False:
-            return {"input_ids": self.get_tokenizer().encode(prompt, add_special_tokens=False)}, {}
-        return {"prompt": prompt}, {}
+            ids = self.get_tokenizer().encode(prompt, add_special_tokens=False)
+            return {"input_ids": ids}, recorded
+        return {"prompt": prompt}, recorded
 
     def _build_sampling_params(self, params: SamplingParams) -> dict[str, Any]:
         if params.truncate_prompt_tokens is not None or params.truncation_side is not None:
@@ -526,6 +551,15 @@ class SGLangProvider(InferenceProvider):
             )
             for output in samples:
                 output.metadata.update(prepared[offset][1])
+                if output.metadata.get(PROMPT_OPENS_THINK_KEY):
+                    # Whether that trace closed, from the text and the generated ids.
+                    closed = think_closed(
+                        output.text or "",
+                        output.metadata.get("output_token_ids"),
+                        self._think_close_token_id(),
+                    )
+                    if closed is not None:
+                        output.metadata[THINK_CLOSED_KEY] = closed
                 if failures:
                     # The scorer expects the complete requested sample budget.
                     # Mark the whole request, including any successful samples,

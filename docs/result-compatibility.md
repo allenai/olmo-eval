@@ -16,6 +16,25 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-23: `unclosed_think` counts traces the chat template opened (#588)
+
+- **Affected**: the `generation_counts.unclosed_think` diagnostic of every generation
+  task, for models whose chat template ends its generation prompt with `<think>` (the
+  Olmo 3.5 templates do), run on the SGLang or inline vLLM provider. On the vLLM
+  server provider only tasks that set `thinking_prefilled="auto"` are affected: the
+  record costs a server call there, so other requests are sent unchanged.
+- **Change**: those providers record on each output that the prompt opened the trace
+  (`prompt_opens_think`) and, where they have evidence, whether it closed
+  (`think_closed`: a `</think>` in the text or its token id among the generated ids).
+  Both are saved with predictions. A generation with evidence that the trace stayed
+  open is counted as an unclosed trace. Before, only an emitted `<think>` with no
+  closing tag was counted, so these runs reported 0 however many generations stopped
+  inside the trace. An output without evidence is not counted.
+- **Identity**: task hashes and scores do not change; only the diagnostic changes.
+- **Comparability**: quality scores remain comparable. `unclosed_think` counts from
+  before this change undercount for such models and are not recomputed; `cap_hit` is
+  unaffected.
+
 ## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
 
 - **Affected**: every spec of `gsm8k` (except `gsm8k:platinum`, which has its own

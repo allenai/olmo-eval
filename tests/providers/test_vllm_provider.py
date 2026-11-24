@@ -161,6 +161,28 @@ def test_generate_keeps_completion_prompt_unchanged(
     assert llm.generate_calls[0]["prompts"] == ["Complete me"]
 
 
+def test_generate_records_a_prompt_that_opens_a_trace(fake_provider) -> None:
+    provider, _, tokenizer = fake_provider
+    opened = LMRequest(request_type=RequestType.COMPLETION, prompt="Q<think>\n")
+    plain = LMRequest(request_type=RequestType.COMPLETION, prompt="Q")
+
+    outputs = provider.generate([opened, plain], SamplingParams(max_tokens=1))
+
+    # The tag is ordinary text here, so "ok" without it is a trace that stayed open.
+    assert outputs[0][0].metadata["prompt_opens_think"] is True
+    assert outputs[0][0].metadata["think_closed"] is False
+    assert "prompt_opens_think" not in outputs[1][0].metadata
+    assert "think_closed" not in outputs[1][0].metadata
+
+    # The default decode drops a single-token tag: only the generated ids ([7]) show it.
+    tokenizer.get_added_vocab = lambda: {"</think>": 7}
+    assert provider.generate([opened], SamplingParams(max_tokens=1))[0][0].metadata["think_closed"]
+    tokenizer.get_added_vocab = lambda: {"</think>": 8}
+    assert not provider.generate([opened], SamplingParams(max_tokens=1))[0][0].metadata[
+        "think_closed"
+    ]
+
+
 def test_generate_preserves_termination_without_logprobs(fake_provider) -> None:
     provider, _, _ = fake_provider
     request = LMRequest(request_type=RequestType.COMPLETION, prompt="Q")

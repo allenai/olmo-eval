@@ -682,6 +682,77 @@ class TestThinkingPrefilled:
         assert response.outputs[0].text == "reasoning</think>\n\n4"
         assert response.outputs[0].metadata == {}
 
+    def test_auto_reads_the_prompt_record_of_each_output(self):
+        """One spec serves outputs whose prompt opened the trace and outputs whose did not."""
+        task = self._task(
+            strip_thinking=True, strip_unclosed_thinking=True, thinking_prefilled="auto"
+        )
+        response = self._make_response(
+            ["cut off mid-trace", "plain answer", "reasoning</think>4", "<think>cut off"]
+        )
+        response.outputs[0].metadata.update(prompt_opens_think=True, think_closed=False)
+        response.outputs[2].metadata.update(prompt_opens_think=True, think_closed=True)
+
+        task.strip_thinking_traces([response])
+        first = [(o.text, dict(o.metadata)) for o in response.outputs]
+        task.strip_thinking_traces([response])
+
+        assert [o.text for o in response.outputs] == ["", "plain answer", "4", ""]
+        assert response.outputs[0].metadata["unclosed_thinking"] is True
+        assert response.outputs[0].metadata["original_text"] == "cut off mid-trace"
+        assert "unclosed_thinking" not in response.outputs[1].metadata
+        assert [(o.text, dict(o.metadata)) for o in response.outputs] == first
+
+    @pytest.mark.parametrize("finish_reason", ["stop", "length"])
+    def test_auto_follows_the_evidence_not_the_finish_reason(self, finish_reason):
+        task = self._task(strip_unclosed_thinking=True, thinking_prefilled="auto")
+        response = self._make_response(["a capped answ", "a trace that ended at end of turn"])
+        closed, unclosed = response.outputs
+        closed.metadata.update(
+            prompt_opens_think=True, think_closed=True, finish_reason=finish_reason
+        )
+        unclosed.metadata.update(
+            prompt_opens_think=True, think_closed=False, finish_reason=finish_reason
+        )
+
+        task.strip_thinking_traces([response])
+
+        assert [o.text for o in response.outputs] == ["a capped answ", ""]
+
+    @pytest.mark.parametrize(
+        "record",
+        [{"prompt_opens_think": True}, {"prompt_opens_think": None}],
+    )
+    def test_auto_does_not_score_an_output_without_evidence(self, record):
+        """Neither an answer nor an unfinished trace: the instance is left unscored."""
+        from olmo_eval.common.scorers.execution import ScoringIncompleteError
+
+        task = self._task(strip_unclosed_thinking=True, thinking_prefilled="auto")
+        response = self._make_response(["the answer is 4"])
+        response.outputs[0].metadata.update(record, finish_reason="stop")
+
+        with pytest.raises(ScoringIncompleteError, match="no evidence"):
+            task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == "the answer is 4"
+
+    def test_an_explicit_setting_never_needs_evidence(self):
+        task = self._task(strip_unclosed_thinking=True, thinking_prefilled=True)
+        response = self._make_response(["the answer is 4"])
+        response.outputs[0].metadata["prompt_opens_think"] = None
+
+        task.strip_thinking_traces([response])
+
+        assert response.outputs[0].text == ""
+
+    def test_auto_is_serialized_and_parsed_as_an_override(self):
+        from olmo_eval.evals.tasks.common.registry import parse_overrides
+
+        config = TaskConfig(name="t", data_source="d", thinking_prefilled="auto")
+        assert config.to_dict()["thinking_prefilled"] == "auto"
+        assert parse_overrides("thinking_prefilled=auto") == {"thinking_prefilled": "auto"}
+        assert parse_overrides("thinking_prefilled=true") == {"thinking_prefilled": True}
+
     def test_to_dict(self):
         assert (
             TaskConfig(name="t", data_source="d", thinking_prefilled=True).to_dict()[

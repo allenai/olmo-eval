@@ -7,12 +7,14 @@ from dataclasses import replace
 from typing import Any
 
 from olmo_eval.common.logging import get_logger
+from olmo_eval.common.scorers.execution import ScoringIncompleteError, format_scoring_error
 from olmo_eval.common.scoring_failures import (
+    RESPONSE_ERROR_KEY,
     ScoringFailures,
     count_scoring_failures,
     measurable_responses,
 )
-from olmo_eval.common.types import Response, SamplingParams
+from olmo_eval.common.types import Instance, LMRequest, Response, SamplingParams
 from olmo_eval.evals.tasks.common import Task, get_task
 from olmo_eval.runners.asynq.types import QueueItem, TaskTracker, summarize_failed_instances
 from olmo_eval.runners.common.types import DEFAULT_MAX_HARD_FAILURE_RATE, TaskResult
@@ -89,7 +91,7 @@ def prepare_task_items(
             task_id=spec,
             instance_idx=idx,
             instance=inst,
-            request=task.format_request(inst),
+            request=_format_request(task, inst),
             sampling_params=task.get_sampling_params(inst) or existing_params,
         )
         for idx, inst in enumerate(instances)
@@ -181,8 +183,22 @@ async def finalize_task(
     # Sort responses by index (only successful ones)
     responses = [tracker.responses[i] for i in sorted(tracker.responses.keys())]
 
-    tracker.task.strip_thinking_traces(responses)
-    scored = await tracker.task.score_responses(responses)
+    # Stripped one response at a time, as the per-response path does, so that an output
+    # stripping refuses to score (no evidence of whether its trace closed) leaves its
+    # own instance unscored instead of failing the task.
+    strippable: list[Response] = []
+    unscored: list[Response] = []
+    for response in responses:
+        try:
+            tracker.task.strip_thinking_traces([response])
+        except ScoringIncompleteError as exc:
+            _mark_unscored(response, format_scoring_error(exc, phase="response"))
+            unscored.append(response)
+        else:
+            strippable.append(response)
+    scored = (
+        [*await tracker.task.score_responses(strippable), *unscored] if strippable else unscored
+    )
     return compute_task_metrics(
         spec=tracker.spec,
         task=tracker.task,
@@ -192,6 +208,28 @@ async def finalize_task(
         duration_seconds=duration,
         max_hard_failure_rate=max_hard_failure_rate,
     )
+
+
+def _format_request(task: Task, instance: Instance) -> LMRequest:
+    """The task's request for an instance, marked when the task reads trace closure."""
+    request = task.format_request(instance)
+    if task.config.thinking_prefilled == "auto" and not request.record_thinking:
+        request = replace(request, record_thinking=True)
+    return request
+
+
+def _mark_unscored(response: Response, error: dict[str, str]) -> None:
+    """Leave a response unscored, with ``error`` on each output under ``__response__``."""
+    response.scores.clear()
+    if not response.outputs:
+        response.scoring_error = error
+        return
+    for output in response.outputs:
+        if output.metadata is None:
+            output.metadata = {}
+        for key in [key for key in output.metadata if key.startswith("score:")]:
+            del output.metadata[key]
+        output.metadata.setdefault("scoring_errors", {})[RESPONSE_ERROR_KEY] = dict(error)
 
 
 def compute_task_metrics(

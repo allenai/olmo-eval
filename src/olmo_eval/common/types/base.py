@@ -250,6 +250,20 @@ class ContextFit:
     max_prompt_tokens: int | None = None
 
 
+#: ``LMOutput.metadata`` key saying whether the prompt a provider rendered ends by opening
+#: a ``<think>`` trace, so that the generation starts inside the trace and carries no
+#: opening tag. True when it does; None when the provider tried to find out and could
+#: not; absent when it does not, or for a provider that does not look.
+PROMPT_OPENS_THINK_KEY = "prompt_opens_think"
+
+#: ``LMOutput.metadata`` key saying whether a trace the prompt opened was closed, from
+#: evidence the provider holds: a ``</think>`` in the text, or its token id among the
+#: generated ids. True or False when the provider has such evidence, absent when it has
+#: none. A missing ``</think>`` in the text is not evidence by itself: a decoder drops
+#: the tag when the tokenizer marks it special, and a server-side reasoning parser
+#: removes it. Set only beside ``PROMPT_OPENS_THINK_KEY``.
+THINK_CLOSED_KEY = "think_closed"
+
 #: ``LMOutput.metadata`` key holding how many tokens a provider cut from a request's
 #: ``ContextFit`` text before generating; absent when nothing was cut.
 CONTEXT_CUT_TOKENS_KEY = "context_cut_tokens"
@@ -276,6 +290,11 @@ class LMRequest:
     #: Score the one continuation in full from an empty prompt, in windows of the
     #: context if it is longer. Needs a provider with ``supports_rolling_logprobs``.
     rolling: bool = False
+    #: The task reads whether this generation's reasoning trace closed (it sets
+    #: ``thinking_prefilled="auto"``). A provider that has to ask its server for that,
+    #: or change the request to get it, does so only for such requests, so every other
+    #: request is sent exactly as before.
+    record_thinking: bool = False
 
     def __post_init__(self) -> None:
         if not self.rolling:
