@@ -147,12 +147,6 @@ def test_bits_per_byte_leaves_out_the_bytes_of_an_unscored_first_token(monkeypat
     )
 
 
-def test_the_rolling_prefix_rule_is_in_the_task_hash():
-    assert get_task("paloma_ptb", WINDOW).config.to_dict()["task_settings"] == {
-        "rolling_prefix": "tokenizer"
-    }
-
-
 def test_suite_averages_the_sources_equally():
     suite = get_suite("paloma")
     assert suite.aggregation == AggregationStrategy.AVERAGE

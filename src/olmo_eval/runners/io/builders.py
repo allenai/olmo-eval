@@ -87,7 +87,6 @@ def build_predictions(scored: Sequence[Any], metrics: Sequence[Metric] = ()) -> 
                 "num_windows",
                 "window_tokens",
                 "prefix_tokens",
-                "unscored_leading_tokens",
                 "scored_bytes",
             ):
                 if key in meta:

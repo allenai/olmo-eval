@@ -27,7 +27,7 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   checkpoints that never saw an EOS before a document scored far worse after one (macro
   bits per byte up to 2.9 instead of about 1.1). Tokenizers that add BOS score exactly as
   before. Outputs and prediction files now record `num_windows`, `window_tokens`,
-  `prefix_tokens`, `unscored_leading_tokens` and `scored_bytes`.
+  `prefix_tokens` and `scored_bytes`.
 - **Identity**: the Paloma tasks set `task_settings={"rolling_prefix": "tokenizer"}`, so
   all 16 task hashes change.
 - **Comparability**: for models whose tokenizer adds BOS, earlier Paloma results are

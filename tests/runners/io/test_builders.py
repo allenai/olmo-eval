@@ -278,7 +278,6 @@ def test_build_predictions_keeps_rolling_fields_and_divides_by_scored_bytes() ->
         "num_windows": 3,
         "window_tokens": 8191,
         "prefix_tokens": 0,
-        "unscored_leading_tokens": 1,
         "scored_bytes": 9,
     }
     response = Response(

@@ -481,8 +481,7 @@ class VLLMProvider(InferenceProvider):
         windows_per_continuation: list[list[tuple[list[int], int]]] = []
         # (num_tokens_all, overflow, rolling metadata or None)
         continuation_meta: list[tuple[int, int, dict[str, int] | None]] = []
-        # Rolling texts start with the tokenizer's own prefix, not BOS-or-EOS: a
-        # model whose tokenizer adds no BOS never saw a special token before a text.
+        # What the tokenizer itself puts before a text; nothing for OLMo and Qwen.
         rolling_prefix = default_prefix_ids(tokenizer) if any(r.rolling for r in requests) else []
 
         for request in requests:
@@ -503,15 +502,13 @@ class VLLMProvider(InferenceProvider):
                     # Inputs of max_length - 1 leave room for the one generated token.
                     windows = rolling_token_windows(rolling_prefix, tokens, max_len - 1)
                     # With no prefix the first token is context, so its bytes are not scored.
-                    unscored = 0 if rolling_prefix else min(1, len(tokens))
-                    unscored_bytes = (
-                        leading_token_bytes(tokenizer, continuation, tokens[0]) if unscored else 0
-                    )
+                    unscored_bytes = 0
+                    if not rolling_prefix and tokens:
+                        unscored_bytes = leading_token_bytes(tokenizer, continuation, tokens[0])
                     rolling = {
                         "num_windows": len(windows),
                         "window_tokens": max_len - 1,
                         "prefix_tokens": len(rolling_prefix),
-                        "unscored_leading_tokens": unscored,
                         "scored_bytes": max(0, len(continuation.encode("utf-8")) - unscored_bytes),
                     }
                     overflow = 0
