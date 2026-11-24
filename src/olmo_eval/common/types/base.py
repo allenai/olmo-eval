@@ -290,6 +290,11 @@ class LMRequest:
     #: Score the one continuation in full from an empty prompt, in windows of the
     #: context if it is longer. Needs a provider with ``supports_rolling_logprobs``.
     rolling: bool = False
+    #: The task reads whether this generation's reasoning trace closed (it sets
+    #: ``thinking_prefilled="auto"``). A provider that has to ask its server for that,
+    #: or change the request to get it, does so only for such requests, so every other
+    #: request is sent exactly as before.
+    record_thinking: bool = False
 
     def __post_init__(self) -> None:
         if not self.rolling:

@@ -536,7 +536,9 @@ class TestVLLMServerProviderLogprobs:
         client = MagicMock()
         client.chat.completions.create = AsyncMock(return_value=response)
         request = LMRequest(
-            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+            request_type=RequestType.CHAT,
+            messages=[{"role": "user", "content": "Hi"}],
+            record_thinking=True,
         )
 
         outputs = await provider._generate_chat(client, request, SamplingParams(num_samples=3))
@@ -572,7 +574,9 @@ class TestVLLMServerProviderLogprobs:
         client = MagicMock()
         client.chat.completions.create = AsyncMock(return_value=response)
         request = LMRequest(
-            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+            request_type=RequestType.CHAT,
+            messages=[{"role": "user", "content": "Hi"}],
+            record_thinking=True,
         )
 
         outputs = await provider._generate_chat(client, request, SamplingParams(num_samples=3))
@@ -592,7 +596,9 @@ class TestVLLMServerProviderLogprobs:
         client = MagicMock()
         client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
         request = LMRequest(
-            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+            request_type=RequestType.CHAT,
+            messages=[{"role": "user", "content": "Hi"}],
+            record_thinking=True,
         )
 
         outputs = await provider._generate_chat(client, request, SamplingParams(max_tokens=4))
@@ -606,7 +612,9 @@ class TestVLLMServerProviderLogprobs:
         client = MagicMock()
         client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
         request = LMRequest(
-            request_type=RequestType.CHAT, messages=[{"role": "user", "content": "Hi"}]
+            request_type=RequestType.CHAT,
+            messages=[{"role": "user", "content": "Hi"}],
+            record_thinking=True,
         )
 
         outputs = await provider._generate_chat(client, request, SamplingParams(max_tokens=4))
@@ -614,6 +622,65 @@ class TestVLLMServerProviderLogprobs:
         assert "prompt_opens_think" not in outputs[0].metadata
         assert "think_closed" not in outputs[0].metadata
         provider._get_think_close_ids.assert_not_awaited()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("request_type", [RequestType.CHAT, RequestType.COMPLETION])
+    async def test_a_request_that_does_not_ask_is_sent_exactly_as_before(
+        self, provider, request_type
+    ):
+        """No server lookup, no added request field and no record, whatever the template."""
+        provider = self._unstubbed(provider)
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=self._make_chat_response())
+        client.completions.create = AsyncMock(return_value=self._make_completion_response())
+        params = SamplingParams(max_tokens=4, temperature=0.6, top_p=0.95)
+        posted = []
+        # A template that opens a trace, with a single-token closing tag: the case
+        # that would add ``return_token_ids`` if the request had asked.
+        server = {"tokenize": {"tokens": [9]}, "detokenize": {"prompt": "<think>\n"}}
+
+        with self._prompt_server(server, posted):
+            if request_type == RequestType.CHAT:
+                plain = LMRequest(request_type, messages=[{"role": "user", "content": "Hi"}])
+                outputs = await provider._generate_chat(client, plain, params)
+                sent = dict(client.chat.completions.create.call_args.kwargs)
+                asking = LMRequest(
+                    request_type, messages=[{"role": "user", "content": "Hi"}], record_thinking=True
+                )
+                await provider._generate_chat(client, asking, params)
+                sent_when_asking = client.chat.completions.create.call_args.kwargs
+            else:
+                plain = LMRequest(request_type, prompt="Q<think>\n")
+                outputs = await provider._generate_completion(client, plain, params)
+                sent = dict(client.completions.create.call_args.kwargs)
+                posted_before = list(posted)
+                asking = LMRequest(request_type, prompt="Q<think>\n", record_thinking=True)
+                await provider._generate_completion(client, asking, params)
+                sent_when_asking = client.completions.create.call_args.kwargs
+                assert posted_before == []
+
+        assert "prompt_opens_think" not in outputs[0].metadata
+        assert "think_closed" not in outputs[0].metadata
+        if request_type == RequestType.CHAT:
+            # The request as it was before this record existed.
+            assert sent == {
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "n": 1,
+                "max_tokens": 4,
+                "temperature": 0.6,
+                "top_p": 0.95,
+                "logprobs": True,
+                "top_logprobs": 1,
+            }
+            assert sent_when_asking["extra_body"] == {"return_token_ids": True}
+            # Only the asking request reached /tokenize and /detokenize.
+            assert [json["messages"] for url, json in posted if "messages" in json] == [
+                asking.messages
+            ]
+        else:
+            assert sent == sent_when_asking
+            assert len(posted) == 1  # the closing tag's ids, for the asking request
 
     @pytest.mark.anyio
     async def test_completion_outputs_record_a_prompt_that_opens_a_trace(self, provider):
@@ -627,7 +694,11 @@ class TestVLLMServerProviderLogprobs:
         params = SamplingParams(max_tokens=8)
 
         opened = await provider._generate_completion(
-            client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q<think>\n"), params
+            client,
+            LMRequest(
+                request_type=RequestType.COMPLETION, prompt="Q<think>\n", record_thinking=True
+            ),
+            params,
         )
         plain = await provider._generate_completion(
             client, LMRequest(request_type=RequestType.COMPLETION, prompt="Q"), params
