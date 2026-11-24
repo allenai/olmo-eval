@@ -9,7 +9,7 @@ from dataclasses import replace
 import pytest
 
 import olmo_eval.evals  # noqa: F401  (registration side effect)
-from olmo_eval.common.images import resolve_images
+from olmo_eval.common.images import PathImage, resolve_images
 from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common.registry import get_task
 from olmo_eval.evals.vision.benchmarks.dense_caption import _DEFAULT_METRICS, DenseCaptionAvgMetric
@@ -149,8 +149,9 @@ class TestLazyImageRequests:
             question="q", gold_answer=None, metadata={"image_path": "/nonexistent/img.png"}
         )
         request = task.format_request(instance)
-        # a path string — building the request must not open the file
-        assert request.images == ("/nonexistent/img.png",)
+        # a typed PathImage reference — building the request must not open the file
+        assert request.images == (PathImage("/nonexistent/img.png"),)
+        assert request.images[0].to_json() == {"type": "path", "path": "/nonexistent/img.png"}
 
     def test_resolve_images_opens_paths_and_calls_callables(self, tmp_path):
         PIL_Image = pytest.importorskip("PIL.Image")

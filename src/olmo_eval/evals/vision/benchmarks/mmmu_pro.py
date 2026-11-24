@@ -23,6 +23,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from olmo_eval.common.images import ImageList, ImageReference
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.scorers.base import Scorer
 from olmo_eval.common.types import Instance, Response, SamplingParams, Split
@@ -165,7 +166,7 @@ class MmmuProTask(ImageQATask):
                     "options": options,
                     "example_id": ex["id"],
                     "subject": ex["subject"],
-                    "images": images,
+                    "images": ImageList(tuple(images)),
                 },
             )
 
@@ -187,7 +188,7 @@ class MmmuProTask(ImageQATask):
                 },
             )
 
-    def _attach_images(self, instance: Instance) -> tuple[Any, ...] | None:
+    def _attach_images(self, instance: Instance) -> tuple[ImageReference | Any, ...] | None:
         """Lazy references only; the provider resolves them and drops ``None`` entries.
 
         The standard setting interleaves up to seven images in token order; the
@@ -195,6 +196,11 @@ class MmmuProTask(ImageQATask):
         """
         meta = instance.metadata
         if "images" in meta:
-            return tuple(meta["images"]) or None
+            images = meta["images"]
+            if isinstance(images, ImageList):
+                return (images,) if images.items else None
+            if isinstance(images, ImageReference):
+                return (images,)
+            return tuple(images) or None
         image = meta.get("image")
         return (image,) if image is not None else None

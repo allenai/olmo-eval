@@ -29,12 +29,14 @@ Data is fetched from the Hub at a pinned revision; set ``OLMOCR_BENCH_DIR`` to a
 
 from __future__ import annotations
 
-import functools
 import json
 import os
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from olmo_eval.common.images import ImageReference
 from olmo_eval.common.metrics.base import Metric
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.evals.tasks.common import register
@@ -88,7 +90,7 @@ _METRICS: tuple[Metric, ...] = (
 
 
 def _render_pdf_page(pdf_path: str, target_longest_image_dim: int):
-    """Rasterize a single-page PDF to a PIL image (module-level so it stays picklable)."""
+    """Rasterize a single-page PDF to a PIL image."""
     import pymupdf
     from PIL import Image
 
@@ -97,6 +99,24 @@ def _render_pdf_page(pdf_path: str, target_longest_image_dim: int):
         zoom = target_longest_image_dim / max(page.rect.width, page.rect.height)
         pixmap = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
         return Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
+
+
+@dataclass(frozen=True, slots=True)
+class PdfPageImage(ImageReference):
+    """Reference to a rasterized PDF page rendered lazily at inference time."""
+
+    pdf_path: str
+    target_longest_image_dim: int
+
+    def resolve(self) -> Any:
+        return _render_pdf_page(self.pdf_path, self.target_longest_image_dim)
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "type": "pdf_page",
+            "pdf_path": self.pdf_path,
+            "target_longest_image_dim": self.target_longest_image_dim,
+        }
 
 
 def _bench_data_dir() -> Path:
@@ -155,8 +175,9 @@ class OlmocrBenchTask(OcrTask):
                     "example_id": pdf,
                     "pdf": pdf,
                     "tests": tests,
-                    "image": functools.partial(
-                        _render_pdf_page, str(pdf_path), self.target_longest_image_dim
+                    "image": PdfPageImage(
+                        pdf_path=str(pdf_path),
+                        target_longest_image_dim=self.target_longest_image_dim,
                     ),
                 },
             )
