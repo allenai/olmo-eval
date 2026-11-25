@@ -18,8 +18,8 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 
 ## 2026-11-25: Add base model safety suite variant without the \n\n stopping condition (#583)
 - **Affected**: all tasks and variants that use the safety implementation of the llm as a judge
-- **Change**: responses with only whitespace characters count as empty instead of being passed
-  to the judge for grading.
+- **Change**: responses with only whitespace characters count as empty and score 0 instead of relying
+  on the judge's verdict
 - **Identity**: task hash does not change
 - **Comparability**: before and after are not directly comparable without checking the
   empty statistic
