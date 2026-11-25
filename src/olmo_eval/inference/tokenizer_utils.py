@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def get_bos_token_ids(tokenizer: Any, *, fallback_to_eos: bool = True) -> list[int]:
@@ -70,6 +73,9 @@ def leading_token_bytes(tokenizer: Any, text: str, token_id: int) -> int:
     piece = tokenizer.decode([token_id])
     if piece and "�" not in piece and text.startswith(piece):
         return len(piece.encode("utf-8"))
+    if "�" not in piece:
+        # Not a split character: decoding normalized the text, so this may undercount.
+        logger.debug("first token %r does not start the text; counting one character", piece)
     return len(text[:1].encode("utf-8"))
 
 
@@ -150,16 +156,17 @@ def rolling_token_windows(
     prefix: list[int], tokens: list[int], max_len: int
 ) -> list[tuple[list[int], int]]:
     """Cut ``prefix + tokens`` into inputs of at most ``max_len`` tokens that score
-    every token of ``tokens`` exactly once.
+    every token of ``tokens`` after the first exactly once.
 
     Each input after the first conditions on the token before it, and the last
     is right-aligned to keep a full context. This matches lm-eval-harness
     (``get_rolling_token_windows`` with context length 1, then
     ``make_disjoint_window``).
 
-    With no prefix (a tokenizer that adds no BOS) the text starts cold: its first
-    token is the context and only ``tokens[1:]`` are scored, so the model never
-    sees a special token in a place it was not trained to.
+    The text's first token is context and is not scored, with or without a prefix.
+    A tokenizer that adds no BOS has nothing to put before it, and scoring it after
+    some other token would show the model a context it was not trained on. Leaving
+    it out for every tokenizer scores every model on the same tokens of the text.
 
     Args:
         prefix: The tokenizer's own prefix (``default_prefix_ids``), usually BOS or
@@ -169,12 +176,11 @@ def rolling_token_windows(
 
     Returns:
         ``(input_ids, ctxlen)`` pairs; ``input_ids[ctxlen:]`` are the tokens scored.
-        Empty for a text of fewer than two tokens with no prefix.
+        Empty for a text of fewer than two tokens.
     """
-    if not prefix:
-        if len(tokens) < 2:
-            return []
-        prefix, tokens = tokens[:1], tokens[1:]
+    if len(tokens) < 2:
+        return []
+    prefix, tokens = prefix + tokens[:1], tokens[1:]
     if max_len <= len(prefix):
         raise ValueError(f"max_len {max_len} leaves no room after a {len(prefix)}-token prefix")
     sequence = prefix + tokens

@@ -481,8 +481,9 @@ class ScoringLLM(FakeLLM):
         return outputs
 
 
-def _full_context_logprob(text: str, bos: int = 1) -> float:
-    ids = [bos] + [ord(c) for c in text]
+def _full_context_logprob(text: str) -> float:
+    """Every token after the first, each conditioned on the one before it."""
+    ids = [ord(c) for c in text]
     return sum(_logprob(prev, tid) for prev, tid in zip(ids, ids[1:], strict=False))
 
 
@@ -513,11 +514,11 @@ def test_a_rolling_request_scores_a_text_longer_than_the_context_in_full(monkeyp
     inputs = llm.generate_calls[0]["prompts"]
     assert len(inputs) > 1
     assert all(len(p["prompt_token_ids"]) <= 8 for p in inputs)  # max_length - 1
-    assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in TEXT]
+    assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in TEXT[1:]]
     # Each window conditions its first scored token on the token before it, so with a
     # bigram model rolling scores match scoring the whole text in one context.
     assert output.metadata["sum_logits"] == pytest.approx(_full_context_logprob(TEXT))
-    assert output.metadata["num_tokens"] == len(TEXT)
+    assert output.metadata["num_tokens"] == len(TEXT) - 1
     assert output.metadata["num_windows"] == len(inputs)
     assert output.metadata["window_tokens"] == 8
     assert output.metadata["num_tokens_all"] == sum(len(p["prompt_token_ids"]) for p in inputs)
@@ -525,14 +526,16 @@ def test_a_rolling_request_scores_a_text_longer_than_the_context_in_full(monkeyp
     assert output.text == TEXT
 
 
-def test_a_rolling_request_that_fits_is_scored_like_an_ordinary_one(monkeypatch) -> None:  # noqa: ANN001
+def test_a_rolling_request_that_fits_is_scored_like_an_ordinary_one_but_its_first_token(  # noqa: ANN001
+    monkeypatch,
+) -> None:
     provider, _ = _scoring_provider(monkeypatch, max_length=100)
     rolling = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True)
     plain = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,))
 
     [[rolled]], [[scored]] = provider.logprobs([rolling]), provider.logprobs([plain])
 
-    assert rolled.logprobs == scored.logprobs
+    assert rolled.logprobs == scored.logprobs[1:]
     assert rolled.metadata["num_windows"] == 1
     assert "num_windows" not in scored.metadata
 
@@ -561,9 +564,9 @@ def test_rolling_and_ordinary_requests_share_a_batch(monkeypatch) -> None:  # no
     outputs = provider.logprobs(requests)
 
     assert [len(o) for o in outputs] == [1, 2, 1]
-    assert outputs[0][0].metadata["num_tokens"] == len(TEXT)
+    assert outputs[0][0].metadata["num_tokens"] == len(TEXT) - 1
     assert [o.metadata["num_tokens"] for o in outputs[1]] == [2, 3]
-    assert outputs[2][0].metadata["num_tokens"] == 5
+    assert outputs[2][0].metadata["num_tokens"] == 4
 
 
 def test_a_rolling_request_uses_its_own_shorter_max_length(monkeypatch) -> None:  # noqa: ANN001
@@ -589,25 +592,16 @@ def test_a_rolling_window_larger_than_the_engine_is_refused(monkeypatch) -> None
         provider.logprobs([request])
 
 
-def test_an_empty_rolling_text_scores_no_tokens(monkeypatch) -> None:  # noqa: ANN001
-    provider, _ = _scoring_provider(monkeypatch, max_length=9)
-    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=("",), rolling=True)
-
-    [[output]] = provider.logprobs([request])
-
-    assert output.logprobs == []
-    assert output.metadata["num_tokens"] == 0
-
-
-def test_a_rolling_text_starts_with_bos_and_scores_every_byte(monkeypatch) -> None:  # noqa: ANN001
+def test_a_rolling_text_starts_with_bos_and_leaves_out_its_first_token(monkeypatch) -> None:  # noqa: ANN001
     provider, llm = _scoring_provider(monkeypatch, max_length=9)
     request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True)
 
     [[output]] = provider.logprobs([request])
 
-    assert llm.generate_calls[0]["prompts"][0]["prompt_token_ids"][0] == 1
+    assert llm.generate_calls[0]["prompts"][0]["prompt_token_ids"][:2] == [1, ord(TEXT[0])]
+    assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in TEXT[1:]]
     assert output.metadata["prefix_tokens"] == 1
-    assert output.metadata["scored_bytes"] == len(TEXT.encode("utf-8"))
+    assert output.metadata["scored_bytes"] == len(TEXT.encode("utf-8")) - 1
 
 
 def test_without_bos_a_rolling_text_starts_cold_not_after_eos(monkeypatch) -> None:  # noqa: ANN001
@@ -621,16 +615,43 @@ def test_without_bos_a_rolling_text_starts_cold_not_after_eos(monkeypatch) -> No
     assert inputs[0][0] == ord("é")
     assert all(2 not in ids for ids in inputs)  # no EOS anywhere
     assert [entry["token_id"] for entry in output.logprobs] == [ord(c) for c in text[1:]]
-    # Each token after the first is scored once, conditioned on the one before it.
-    expected = sum(_logprob(ord(prev), ord(tid)) for prev, tid in zip(text, text[1:], strict=False))
-    assert output.metadata["sum_logits"] == pytest.approx(expected)
+    assert output.metadata["sum_logits"] == pytest.approx(_full_context_logprob(text))
     assert output.metadata["prefix_tokens"] == 0
     assert output.metadata["scored_bytes"] == len(text.encode("utf-8")) - 2
 
 
+def test_with_and_without_bos_a_rolling_text_scores_the_same_tokens_and_bytes(monkeypatch) -> None:  # noqa: ANN001
+    outputs = []
+    for tokenizer in (ScoringTokenizer(), NoBosScoringTokenizer()):
+        provider, _ = _scoring_provider(monkeypatch, max_length=9, tokenizer=tokenizer)
+        request = LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True
+        )
+        [[output]] = provider.logprobs([request])
+        outputs.append(output)
+
+    with_bos, without_bos = outputs
+    assert [e["token_id"] for e in with_bos.logprobs] == [
+        e["token_id"] for e in without_bos.logprobs
+    ]
+    assert with_bos.metadata["scored_bytes"] == without_bos.metadata["scored_bytes"]
+
+
+def test_add_bos_token_false_leaves_bos_out_of_a_rolling_text(monkeypatch) -> None:  # noqa: ANN001
+    provider, llm = _scoring_provider(monkeypatch, max_length=9)
+    provider._add_bos_token = False
+    request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(TEXT,), rolling=True)
+
+    [[output]] = provider.logprobs([request])
+
+    assert llm.generate_calls[0]["prompts"][0]["prompt_token_ids"][0] == ord(TEXT[0])
+    assert output.metadata["prefix_tokens"] == 0
+
+
+@pytest.mark.parametrize("tokenizer", [ScoringTokenizer(), NoBosScoringTokenizer()])
 @pytest.mark.parametrize("text", ["", "x"])
-def test_without_bos_a_rolling_text_under_two_tokens_scores_nothing(monkeypatch, text) -> None:  # noqa: ANN001
-    provider, _ = _scoring_provider(monkeypatch, max_length=9, tokenizer=NoBosScoringTokenizer())
+def test_a_rolling_text_under_two_tokens_scores_nothing(monkeypatch, tokenizer, text) -> None:  # noqa: ANN001
+    provider, _ = _scoring_provider(monkeypatch, max_length=9, tokenizer=tokenizer)
     request = LMRequest(request_type=RequestType.LOGLIKELIHOOD, continuations=(text,), rolling=True)
 
     [[output]] = provider.logprobs([request])
