@@ -12,6 +12,7 @@ Original implementation: https://github.com/hsiehjackson/RULER
 """
 
 import os
+import random
 import re
 import string
 from collections.abc import Iterator, Sequence
@@ -190,6 +191,17 @@ class RulerTask(Task):
             # Add system template as prepend text for non-chat format
             if not self.ruler_config.get("use_chat_template", False):
                 prepend_text = self._templates["system"].format(**context_fields)
+        elif self.prepends_example and (example := str(doc.get("example") or "").strip()):
+            # The preformatted input leaves out the worked example the data row carries
+            # (VT's one-shot demonstration); the template path above already includes it.
+            # As upstream RULER does, each instance gets its own variable names and value.
+            example = randomize_vt_example(
+                example,
+                seed=doc.get("index", index),
+                avoid_names=[str(a) for a in (doc.get("outputs") or doc.get("answer") or [])],
+                avoid_value=str(doc.get("query", "")),
+            )
+            question = example + "\n\n" + question
 
         # Get answer (handle both "answer" and "outputs" fields)
         answer = doc.get("answer") or doc.get("outputs")
@@ -225,6 +237,16 @@ class RulerTask(Task):
         without failing its batch, and an output whose haystack was cut is emptied.
         """
         return (self.config.task_settings or {}).get("overflow") == "score_zero"
+
+    @property
+    def prepends_example(self) -> bool:
+        """Whether the data row's worked ``example`` precedes the preformatted input (VT's ``:v3``).
+
+        RULER's released ``input`` for VT omits the one-shot example, so models below ~1B
+        often answer in the wrong format (numbers, prose) instead of naming variables. The
+        example's names and value are re-drawn per instance (see randomize_vt_example).
+        """
+        return bool((self.config.task_settings or {}).get("prepend_example"))
 
     @property
     def cuts_answer(self) -> bool:
@@ -322,6 +344,40 @@ class RulerTask(Task):
         return output.text
 
 
+def randomize_vt_example(
+    example: str, seed: Any, avoid_names: Sequence[str] = (), avoid_value: str = ""
+) -> str:
+    """Give a VT worked example new variable names and a new value, as upstream RULER does.
+
+    Upstream (NVIDIA/RULER ``randomize_icl``, since c5341b44) re-draws each example
+    variable as random uppercase letters of the same length, and the assigned value as a
+    random 5-digit number, so every instance carries its own example. The released data
+    stores one example for every row; this re-draws it deterministically from ``seed``
+    (the instance index), keeping its chain and wording. New names and value never equal
+    the instance's own answers or value. An example in an unexpected shape is returned
+    unchanged.
+    """
+    head, sep, tail = example.rpartition("they are:")
+    names = tail.split()
+    value = re.search(r"VAR [A-Z]+ = (\d+)", head)
+    if not sep or not names or value is None or not all(n.isalpha() and n.isupper() for n in names):
+        return example
+    rng = random.Random(f"ruler-vt-example-{seed}")
+    taken = {*names, *avoid_names}
+    new_names = {}
+    for name in names:
+        while (new := "".join(rng.choices(string.ascii_uppercase, k=len(name)))) in taken:
+            pass
+        taken.add(new)
+        new_names[name] = new
+    while (new_value := str(rng.randint(10000, 99999))) in (value.group(1), avoid_value):
+        pass
+    pattern = re.compile(
+        r"\b(" + "|".join(map(re.escape, new_names)) + r"|" + value.group(1) + r")\b"
+    )
+    return pattern.sub(lambda m: new_names.get(m.group(1), new_value), example)
+
+
 #: RULER's newline stops: the newline character and the byte-level spellings some
 #: tokenizers decode it to.
 RULER_STOP_SEQUENCES = ("\n", "Ċ", "ĊĊ", "<0x0A>")
@@ -394,6 +450,9 @@ RULER_V2_MAX_GEN_TOKS = {"vt": 100}
 #: Task types whose `:v2` outputs are scored only up to their first `Question:`.
 RULER_V2_ANSWER_CUT = ("vt",)
 
+#: Task types with a `:v3`: `:v2` plus the data row's worked example before the input.
+RULER_V3_PREPEND_EXAMPLE = ("vt",)
+
 # Dynamically register all RULER tasks
 for _task_name, _task_config in RULER_TASKS.items():
     _cls = make_ruler_task_class(_task_name, _task_config)
@@ -410,16 +469,21 @@ for _task_name, _task_config in RULER_TASKS.items():
     # `:v2`: see RULER_V2_TASK_SETTINGS, RULER_V2_MAX_GEN_TOKS and RULER_V2_ANSWER_CUT.
     _v2_type = _task_name.rsplit("__", 1)[0]
     _v2_budget = RULER_V2_MAX_GEN_TOKS.get(_v2_type)
-    register_variant(
-        f"ruler_{_task_name}",
-        "v2",
-        task_settings={
-            **RULER_V2_TASK_SETTINGS,
-            **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
-        },
-        **(
-            {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
-            if _v2_budget is not None
-            else {}
-        ),
+    _v2_settings = {
+        **RULER_V2_TASK_SETTINGS,
+        **({"answer_cut": "before_question"} if _v2_type in RULER_V2_ANSWER_CUT else {}),
+    }
+    _v2_sampling = (
+        {"sampling_params": replace(vars(_cls)["sampling_params"], max_tokens=_v2_budget)}
+        if _v2_budget is not None
+        else {}
     )
+    register_variant(f"ruler_{_task_name}", "v2", task_settings=_v2_settings, **_v2_sampling)
+    # `:v3` (VT only): `:v2` with the worked example restored, see RULER_V3_PREPEND_EXAMPLE.
+    if _v2_type in RULER_V3_PREPEND_EXAMPLE:
+        register_variant(
+            f"ruler_{_task_name}",
+            "v3",
+            task_settings={**_v2_settings, "prepend_example": "random"},
+            **_v2_sampling,
+        )
