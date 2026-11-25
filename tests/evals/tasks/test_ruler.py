@@ -209,15 +209,3 @@ def test_v3_is_v2_plus_the_example_and_exists_only_for_vt():
     assert _scored_text("ruler_vt__4096:v3", "VAR A", cut_tokens=3) == ""
     with pytest.raises(KeyError, match="Unknown variant 'v3'"):
         get_task("ruler_niah_s_1__4096:v3")
-
-
-def test_v3_fixed_keeps_the_datas_example_for_every_instance():
-    task = get_task("ruler_vt__4096:v3_fixed")
-
-    for index in (0, 7):
-        doc = _vt_doc(index=index)
-        assert task.process_doc(doc).question == _EXAMPLE.strip() + "\n\n" + doc["input"]
-    assert get_task("ruler_vt__4096:v3_fixed").config.task_settings == {
-        **get_task("ruler_vt__4096:v2").config.task_settings,
-        "prepend_example": "fixed",
-    }

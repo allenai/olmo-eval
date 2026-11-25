@@ -18,17 +18,16 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 
 ## 2026-11-24: RULER VT `:v3` restores the worked example
 
-- **Affected**: new specs only, `ruler_vt__{4096,...,131072}:v3` and `:v3_fixed`. Every
-  existing spec, including VT `:v1` and `:v2`, is unchanged.
+- **Affected**: new specs only, `ruler_vt__{4096,...,131072}:v3`. Every existing spec,
+  including VT `:v1` and `:v2`, is unchanged.
 - **Change**: RULER's preformatted VT `input` leaves out the one-shot example that
   upstream RULER's prompt carries (its template path includes it through `{example}`), so
   `:v1` and `:v2` run VT zero-shot. `:v3` is `:v2` with the worked example before the
   input, re-drawn per instance from the instance index as upstream RULER does
-  (`randomize_icl`), never equal to the instance's own answers or value. `:v3_fixed` uses
-  the data row's one fixed example instead, for an ablation.
+  (`randomize_icl`), never equal to the instance's own answers or value.
 - **Identity**: new task hashes.
 - **Comparability**: `:v3` matches upstream RULER's VT prompt; `:v2` does not. Scores are
-  not comparable across the three. `:v3` can score lower than `:v2`: models often answer
+  not comparable between the two. `:v3` can score lower than `:v2`: models often answer
   with the example's variables, more so at long contexts. For others the example fixes the
   answer format at short contexts.
 
