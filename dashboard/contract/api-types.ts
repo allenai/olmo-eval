@@ -55,7 +55,8 @@ export type TaskResultId = Integer;
 /** Flat metrics keyed by "metric_name:scorer_name". */
 export type FlatMetrics = { [metricKey: string]: number | null };
 
-export type RunStatus = "running" | "complete" | "partial" | "failed";
+/** "interrupted": stopped and waiting to resume under the same run ID; not final. */
+export type RunStatus = "running" | "interrupted" | "complete" | "partial" | "failed";
 export type UploadState = "uploading" | "complete";
 export type MetricKind = "binary" | "bounded" | "unbounded";
 export type DisplayFormat = "percent" | "raw";
@@ -417,7 +418,7 @@ export interface RunDetail extends RunSummary {
 /**
  * How inference_seconds was obtained:
  * - measured: the run contained only this task, so its processing time is the task's time.
- * - attributed: from per-batch inference metrics split by the task's share of each batch.
+ * - attributed: the client's attributed worker time divided by the run's inference workers.
  * - estimated: the run's processing time times the task's share of the run's tokens.
  * - not_recorded: the run predates runtime recording or lacks token counts.
  */
@@ -443,6 +444,21 @@ export interface TaskRuntime {
     /** Wall-clock span within the run, in seconds after processing started. */
     span_start_s: number | null;
     span_end_s: number | null;
+    /**
+     * Summed judge model call time while scoring this task. Concurrent calls each count, so it can
+     * exceed wall time. Null means not recorded; 0 means measured with no judge calls.
+     */
+    scoring_judge_seconds: number | null;
+    /**
+     * Summed sandbox operation time while scoring; can exceed wall time. Null means not recorded;
+     * 0 means measured with none.
+     */
+    scoring_sandbox_seconds: number | null;
+    /**
+     * Time running the task's scoring code, summed across scoring threads and processes. Null
+     * means not recorded.
+     */
+    scoring_compute_seconds: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +466,8 @@ export interface TaskRuntime {
 // ---------------------------------------------------------------------------
 
 export interface BaselineCell {
+    /** Generation diagnostics for the baseline task or suite. */
+    generation_counts?: { [count: string]: Count } | null;
     task_result_id: TaskResultId;
     run_id: RunId;
     task_hash: string;
@@ -460,6 +478,27 @@ export interface BaselineCell {
     delta: DeltaStats;
     /** Null for unbounded metrics or when instances do not pair. */
     contingency: Contingency | null;
+}
+
+/**
+ * A task's scoring failures. An unscored instance has no scored output and is left out
+ * of the metrics; with instances that produced no output it counts against the task's
+ * failure budget. A partially scored instance is scored from the outputs that were.
+ */
+export interface ScoringFailures {
+    instances_unscored: Count;
+    instances_partially_scored: Count;
+    /** Outputs with a scoring error, across all instances. */
+    outputs_unscored: Count;
+    /** Unscored outputs whose failure was flagged as infrastructure (judge, sandbox). */
+    infrastructure: Count;
+    /** Unscored outputs by exception type, from each output's first error. */
+    by_type: { [type: string]: Count };
+    /**
+     * The first scoring error as "Type: message", capped at 500 characters.
+     * @maxLength 500
+     */
+    first_error?: string | null;
 }
 
 export interface TaskResultRow {
@@ -480,6 +519,10 @@ export interface TaskResultRow {
     n: Count;
     instances_processed: Count | null;
     instances_failed: Count | null;
+    /** Per-generation diagnostics, available even when predictions were not uploaded. */
+    generation_counts?: { [count: string]: Count } | null;
+    /** Outputs and instances whose scores could not be computed; null when none failed. */
+    scoring_failures?: ScoringFailures | null;
     instances_stored: Count;
     metrics: FlatMetrics;
     error: string | null;
@@ -513,12 +556,16 @@ export interface RunTaskResultsResponse {
 // ---------------------------------------------------------------------------
 
 export interface SuiteBaselineCell {
+    /** Generation diagnostics for the baseline task or suite. */
+    generation_counts?: { [count: string]: Count } | null;
     score: number | null;
     stderr: number | null;
     delta: DeltaStats;
 }
 
 export interface SuiteResultRow {
+    /** Summed diagnostics from the suite's contributing task results. */
+    generation_counts?: { [count: string]: Count } | null;
     name: string;
     parent: string | null;
     depth: Count;
@@ -1323,7 +1370,7 @@ export interface ActivityItem {
     runs: RunSummary[];
     n_tasks: Count;
     n_failed_tasks: Count;
-    /** Worst status among the runs (failed > partial > running > complete). */
+    /** Worst status among the runs (failed > partial > interrupted > running > complete). */
     status: RunStatus;
     /** First task error message when any task failed. */
     failure_reason: string | null;

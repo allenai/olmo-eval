@@ -33,6 +33,10 @@ class InferenceProvider(ABC):
     #: the harness refuses such a request instead.
     supports_tools: bool = False
 
+    #: Whether this provider scores ``LMRequest.rolling`` requests; see
+    #: ``require_rolling_support``.
+    supports_rolling_logprobs: bool = False
+
     def __init__(self, model_name: str) -> None:
         """Initialize the provider.
 
@@ -173,6 +177,11 @@ class InferenceProvider(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} does not provide tokenizer access")
 
+    @property
+    def openai_client_model_name(self) -> str:
+        """Model name to send with the client from ``get_openai_client``."""
+        return self.model_name
+
     def get_openai_client(self) -> AsyncOpenAI:
         """Get an AsyncOpenAI client for this provider.
 
@@ -207,4 +216,21 @@ def require_tool_support(provider: InferenceProvider) -> None:
         "with a provider that sends them (e.g. the default provider.kind="
         "vllm_server), or with a task variant that writes the functions into the "
         "prompt text instead."
+    )
+
+
+def require_rolling_support(provider: InferenceProvider) -> None:
+    """Fail before sending a rolling request to a provider that would truncate it.
+
+    Such a provider scores only the part of a long text that fits its context,
+    and a per-byte or per-token score over the whole text then reads as a better
+    model rather than a cut-off one.
+    """
+    if getattr(provider, "supports_rolling_logprobs", False):
+        return
+    name = type(getattr(provider, "base_provider", provider)).__name__
+    raise ValueError(
+        f"{name} does not score rolling requests, which this task "
+        "uses to score texts longer than the context in full. Run it with "
+        "provider.kind=vllm."
     )

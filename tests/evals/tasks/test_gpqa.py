@@ -2,7 +2,7 @@
 
 import pytest
 
-from olmo_eval.common.types import Instance, LMOutput, RequestType
+from olmo_eval.common.types import Instance, LMOutput, LMRequest, RequestType, Response
 from olmo_eval.evals.tasks.common import get_task, list_tasks
 
 
@@ -431,3 +431,38 @@ class TestCoTVariant:
     def test_extract_answer_strips_parens(self, task):
         output = LMOutput(text="Reasoning. Therefore, the answer is (D)")
         assert task.extract_answer(output) == "D"
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("strip_closed", [False, True])
+    @pytest.mark.parametrize("prefilled", [False, True])
+    async def test_unfinished_thinking_does_not_credit_a_stray_letter(
+        self, strip_closed, prefilled
+    ):
+        task = get_task(
+            "gpqa_diamond:cot",
+            config_overrides={
+                "strip_thinking": strip_closed,
+                "strip_unclosed_thinking": True,
+                "thinking_prefilled": prefilled,
+            },
+        )
+        text = "maybe (B)" if prefilled else "<think>a</think> draft <think>maybe (B)"
+        instance = Instance(question="Q", gold_answer="B")
+        response = Response(
+            instance=instance,
+            request=LMRequest(
+                request_type=RequestType.COMPLETION,
+                prompt="Q<think>" if prefilled else "Q",
+            ),
+            outputs=[LMOutput(text=text)],
+        )
+
+        task.strip_thinking_traces([response])
+        task.strip_thinking_traces([response])
+        scored = await task.score_responses([response])
+
+        output = scored[0].outputs[0]
+        assert output.text == ""
+        assert output.metadata["original_text"] == text
+        assert output.metadata["unclosed_thinking"] is True
+        assert scored[0].scores["exact_match"] == 0.0

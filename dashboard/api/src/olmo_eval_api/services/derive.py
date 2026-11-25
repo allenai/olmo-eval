@@ -150,6 +150,11 @@ def finite_or_none(value: Any) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def nonneg_finite_or_none(value: Any) -> float | None:
+    seconds = finite_or_none(value)
+    return seconds if seconds is not None and seconds >= 0 else None
+
+
 def metric_name(metric_key: str) -> str:
     """ "acc:default" -> "acc"."""
     return metric_key.rsplit(":", 1)[0] if ":" in metric_key else metric_key

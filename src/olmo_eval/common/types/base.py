@@ -218,6 +218,43 @@ class Instance:
     expected_final_state: dict[str, Any] | None = None
 
 
+#: ``LMRequest.metadata`` key holding the scripted user messages a multi-turn
+#: conversation sends after each of the model's replies.
+FOLLOW_UP_TURNS_KEY = "follow_up_turns"
+
+
+#: Whether the text used for scoring is empty, before answer parsing. Tasks that
+#: transform text internally set this without replacing ``LMOutput.text``.
+SCORING_TEXT_EMPTY_KEY = "scoring_text_empty"
+
+#: ``LMOutput.metadata`` key holding one record per user turn the model answered, in
+#: order: the reply as ``text``, plus the ``finish_reason``, ``prompt_tokens`` and
+#: ``completion_tokens`` the provider reported for that turn.
+TURNS_KEY = "turns"
+
+
+@dataclass(frozen=True, slots=True)
+class ContextFit:
+    """Text in a request's prompt that may be cut short so the prompt fits.
+
+    Long-context tasks whose reference harness truncates the document with the
+    evaluated model's own tokenizer name that document here. A provider that
+    supports it counts the rendered prompt with the model's tokenizer and, when
+    it is longer than ``max_prompt_tokens`` or than the room the context window
+    leaves for ``max_tokens``, removes the overflow from the end of ``text`` so
+    the instructions and the question around it survive. ``text`` must occur
+    exactly once in the prompt, or in one message.
+    """
+
+    text: str
+    max_prompt_tokens: int | None = None
+
+
+#: ``LMOutput.metadata`` key holding how many tokens a provider cut from a request's
+#: ``ContextFit`` text before generating; absent when nothing was cut.
+CONTEXT_CUT_TOKENS_KEY = "context_cut_tokens"
+
+
 @dataclass(frozen=True, slots=True)
 class LMRequest:
     """Request to send to a language model."""
@@ -234,6 +271,21 @@ class LMRequest:
     #: Per-instance payload for a scaffold that needs more than the messages,
     #: such as the state a multi-turn rollout acts on. Not sent to the model.
     metadata: dict[str, Any] | None = None
+    #: Text the provider may shorten to fit the prompt; see ``ContextFit``.
+    context_fit: ContextFit | None = None
+    #: Score the one continuation in full from an empty prompt, in windows of the
+    #: context if it is longer. Needs a provider with ``supports_rolling_logprobs``.
+    rolling: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.rolling:
+            return
+        if self.request_type != RequestType.LOGLIKELIHOOD:
+            raise ValueError(f"rolling applies to loglikelihood requests, not {self.request_type}")
+        if self.prompt or self.continuation_prompts:
+            raise ValueError("a rolling request scores its continuation from an empty prompt")
+        if self.continuations is None or len(self.continuations) != 1:
+            raise ValueError("a rolling request scores exactly one continuation")
 
 
 @hide_unset()
@@ -255,6 +307,12 @@ class SamplingParams:
     #: model's context window. Without it a prompt that leaves less room than
     #: ``max_tokens`` makes the server reject the whole request.
     fit_max_tokens_to_context: bool = False
+
+    def __post_init__(self) -> None:
+        # JSON/CLI overrides arrive as lists. Keep these frozen parameters
+        # hashable because the async runner groups requests by sampling params.
+        if isinstance(self.stop_sequences, list):
+            object.__setattr__(self, "stop_sequences", tuple(self.stop_sequences))
 
 
 @dataclass(slots=True)
@@ -290,3 +348,6 @@ class Response:
     scores: dict[str, float] = field(default_factory=dict)
     trajectory: AgentTrajectory | None = None
     request_trace: dict[str, Any] | None = None
+    # Why scoring failed for a response with no outputs to record it on; an output's
+    # own failures are under its metadata's ``scoring_errors``.
+    scoring_error: dict[str, str] | None = None

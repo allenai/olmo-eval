@@ -9,7 +9,7 @@ import { JsonDiff, JsonTree } from "@/components/Json";
 import { Badge, Button, Checkbox, CopyText, EmptyState, ErrorPanel, Panel, Skeleton, Tip } from "@/components/primitives";
 import { toast } from "@/components/toast";
 import { formatCI, formatCount, formatDelta, formatDuration, formatP, formatRate, formatRuntime, formatScore, metricLabel, sig3 } from "@/lib/format";
-import { BASIS_LABEL, basisMark } from "@/lib/runtime";
+import { BASIS_LABEL, basisMark, formatScoringSummary } from "@/lib/runtime";
 import { rowMeta, scoreFormat } from "./types";
 
 export async function openSigned(gsUri: string): Promise<void> {
@@ -82,6 +82,7 @@ export function TaskDrilldown({
   const baseConfig = baseConfigs.data?.task_configs.find((c) => c.task_name === row.task_name)?.config;
   const metricKeys = Object.keys(row.metrics).sort((a, b2) => (a === row.primary_metric ? -1 : b2 === row.primary_metric ? 1 : a.localeCompare(b2)));
   const h = hist.data;
+  const scoringSummary = formatScoringSummary(row.runtime);
 
   return (
     <div className="col" style={{ gap: 14 }}>
@@ -306,6 +307,7 @@ export function TaskDrilldown({
                     {formatRuntime(row.runtime.inference_seconds)} ({BASIS_LABEL[row.runtime.basis].toLowerCase()}).{" "}
                   </>
                 )}
+                {scoringSummary && <>{scoringSummary} </>}
                 {row.duration_seconds != null && <>Done {formatDuration(row.duration_seconds)} after processing started. </>}
                 {row.num_fewshot != null && <>{row.num_fewshot}-shot. </>}
                 {row.limit != null && <>Limit {formatCount(row.limit)}. </>}
@@ -320,7 +322,7 @@ export function TaskDrilldown({
           </Panel>
         </div>
       </div>
-      {!row.error && <ScoreSummary row={row} />}
+      <ScoreSummary row={row} />
     </div>
   );
 }
@@ -332,9 +334,9 @@ function ScoreSummary({ row }: { row: TaskResultRow }) {
       {row.instances_failed ? ` · ${formatCount(row.instances_failed)} failed` : ""}
       {row.completion_tokens_total != null && ` · ${formatCount(row.completion_tokens_total)} completion tokens`}
       {row.mean_completion_tokens != null && ` · mean output ${Math.round(row.mean_completion_tokens)} tokens`}
-      {row.score_is_mean ? "" : " · corpus score is not a per-instance mean"}
+      {row.error || row.score_is_mean ? "" : " · corpus score is not a per-instance mean"}
       {" · "}
-      <ScoreValue score={row.score} stderr={row.stderr} format={scoreFormat(row)} />
+      <ScoreValue score={row.error ? null : row.score} stderr={row.error ? null : row.stderr} format={scoreFormat(row)} generationCounts={row.generation_counts} />
     </p>
   );
 }

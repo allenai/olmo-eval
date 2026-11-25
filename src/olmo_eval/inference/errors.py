@@ -64,13 +64,18 @@ _CONTEXT_OVERFLOW_CODES = {"context_length_exceeded"}
 _CONTEXT_OVERFLOW_MESSAGES = ("maximum context length",)
 
 
+def is_context_overflow_message(message: str) -> bool:
+    """Whether an error message reports a prompt too long for the context window."""
+    lowered = message.lower()
+    return any(marker in lowered for marker in _CONTEXT_OVERFLOW_MESSAGES)
+
+
 def is_context_overflow(exc: BaseException) -> bool:
     """Whether an exception chain reports a prompt too long for the context window."""
     for current in _exception_chain(exc):
         if getattr(current, "code", None) in _CONTEXT_OVERFLOW_CODES:
             return True
-        message = str(current).lower()
-        if any(marker in message for marker in _CONTEXT_OVERFLOW_MESSAGES):
+        if is_context_overflow_message(str(current)):
             return True
     return False
 
@@ -101,6 +106,7 @@ __all__ = [
     "classify_terminal_provider_error",
     "first_output",
     "is_context_overflow",
+    "is_context_overflow_message",
     "is_context_overflow_output",
     "request_error",
 ]

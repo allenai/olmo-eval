@@ -8,7 +8,7 @@ from olmo_eval.common.scorers import MinervaMathScorer
 from olmo_eval.common.types import Instance, SamplingParams, Split
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.tasks.common import register, register_variant
-from olmo_eval.evals.tasks.minerva_math import MinervaMathTask
+from olmo_eval.evals.tasks.minerva_math import FINAL_ANSWER_OVERRIDES, MinervaMathTask
 
 _PASS_AT_32_METRICS = {
     "acc": AccuracyMetric(scorer=MinervaMathScorer),
@@ -26,6 +26,12 @@ _PASS_AT_32_SAMPLING = SamplingParams(
     num_samples=32,
 )
 _PASS_AT_32_16K_SAMPLING = replace(_PASS_AT_32_SAMPLING, max_tokens=16384)
+
+# Hill-climbing tier: the pass_at_32 prompt, budget and primary metric (pass@1), from 8 samples.
+_PASS_AT_8_METRICS = {
+    k: v for k, v in _PASS_AT_32_METRICS.items() if k in ("acc", "k1", "k4", "k8")
+}
+_PASS_AT_8_SAMPLING = replace(_PASS_AT_32_SAMPLING, num_samples=8)
 
 _COT_SUFFIX = "\nPlease reason step by step, and put your final answer within \\boxed{{}}."
 
@@ -241,12 +247,23 @@ for _task_name in ("hmmt_feb_2025", "hmmt_nov_2025", "hmmt_feb_2026"):
 
     register_variant(
         _task_name,
+        "pass_at_8",
+        formatter=_PASS_AT_32_FORMATTER,
+        metrics=tuple(_PASS_AT_8_METRICS.values()),
+        primary_metric=_PASS_AT_8_METRICS["k1"],
+        sampling_params=_PASS_AT_8_SAMPLING,
+    )
+
+    register_variant(
+        _task_name,
         "pass_at_32_rlzero",
         formatter=_RLZERO_FORMATTER,
         metrics=tuple(_PASS_AT_32_METRICS.values()),
         primary_metric=_PASS_AT_32_METRICS["k1"],
         sampling_params=_RLZERO_SAMPLING,
     )
+
+    register_variant(_task_name, "final_answer", **FINAL_ANSWER_OVERRIDES)
 
 for _task_name in ("hmmt_nov_2025", "hmmt_feb_2026"):
     register_variant(

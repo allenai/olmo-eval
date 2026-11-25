@@ -10,7 +10,7 @@ import { DeltaValue, ScoreValue, SigLegend } from "@/components/cells";
 import { Badge, Button, Checkbox, CopyText, cx, EmptyState, ErrorPanel, KV, LinkOut, Panel, Skeleton, Tip } from "@/components/primitives";
 import { type Cell, downloadText, toCSV } from "@/lib/csv";
 import { jsonDiff } from "@/lib/diff";
-import { formatCI, formatCount, formatDuration, formatRate, formatRuntime, formatScore, formatStderr, shortHash } from "@/lib/format";
+import { formatCI, formatCount, formatDuration, formatRate, formatRuntime, formatScore, formatStack, formatStderr, shortHash } from "@/lib/format";
 import { useHotkeys } from "@/lib/keyboard";
 import { goodness } from "@/lib/scales";
 import { absoluteLocal } from "@/lib/time";
@@ -172,14 +172,14 @@ function TreeRows({
                 </Tip>
               )}
             </span>
-            <span className={s.right}>{row ? <ScoreValue score={row.score} format={row.display_format} showStderr={false} strong /> : null}</span>
+            <span className={s.right}>{row ? <ScoreValue score={row.score} format={row.display_format} showStderr={false} strong generationCounts={row.generation_counts} /> : null}</span>
             <span className={cx(s.right, "mono muted")} style={{ fontSize: 11.5 }}>
               {row ? formatStderr(row.stderr, row.display_format) : ""}
             </span>
             <span className={cx(s.right, "mono muted")} style={{ fontSize: 12 }}>
               {row ? formatCount(row.n_instances) : ""}
             </span>
-            <span className={s.right}>{row?.baseline ? <ScoreValue score={row.baseline.score} format={row.display_format} showStderr={false} muted /> : null}</span>
+            <span className={s.right}>{row?.baseline ? <ScoreValue score={row.baseline.score} format={row.display_format} showStderr={false} muted generationCounts={row.baseline.generation_counts} /> : null}</span>
             <span className={s.right}>{d ? <DeltaValue stats={d} format={row!.display_format} higherIsBetter={row!.higher_is_better} /> : null}</span>
             <span className={cx(s.right, "mono muted")} style={{ fontSize: 11 }}>
               {d ? formatCI(d.ci_low, d.ci_high, row!.display_format) : ""}
@@ -222,14 +222,14 @@ function TreeRows({
             </Tip>
           )}
         </span>
-        <span className={s.right}>{row.error ? <span className="faint">—</span> : <ScoreValue score={row.score} format={fmt} showStderr={false} />}</span>
+        <span className={s.right}><ScoreValue score={row.error ? null : row.score} format={fmt} showStderr={false} generationCounts={row.generation_counts} /></span>
         <span className={cx(s.right, "mono muted")} style={{ fontSize: 11.5 }}>
           {formatStderr(row.stderr, fmt)}
         </span>
         <span className={cx(s.right, "mono muted")} style={{ fontSize: 12 }}>
           {formatCount(row.n)}
         </span>
-        <span className={s.right}>{b ? <ScoreValue score={b.score} format={fmt} showStderr={false} muted /> : null}</span>
+        <span className={s.right}>{b ? <ScoreValue score={b.score} format={fmt} showStderr={false} muted generationCounts={b.generation_counts} /> : null}</span>
         <span className={s.right}>{b ? <DeltaValue stats={b.delta} format={fmt} higherIsBetter={m.higherIsBetter} /> : null}</span>
         <span className={cx(s.right, "mono muted")} style={{ fontSize: 11 }}>
           {b ? formatCI(b.delta.ci_low, b.delta.ci_high, fmt) : ""}
@@ -325,7 +325,11 @@ function SuiteTree({ ctx, onOpenTask }: { ctx: RunCtx; onOpenTask: (row: TaskRes
         </div>
       ) : !tasks.length ? (
         <EmptyState title="No task results yet" compact>
-          {ctx.run.status === "running" ? "This run is still running. Task results appear as they finish." : "This run recorded no task results."}
+          {ctx.run.status === "running"
+            ? "This run is still running. Task results appear as they finish."
+            : ctx.run.status === "interrupted"
+              ? "This run was interrupted before recording task results."
+              : "This run recorded no task results."}
         </EmptyState>
       ) : (
         <div className={s.tree}>
@@ -378,6 +382,26 @@ function HealthPanel({ ctx }: { ctx: RunCtx }) {
           </>
         ),
         detail: t.error_summary ? Object.entries(t.error_summary).map(([k, v]) => `${k} ×${v}`).join(", ") : undefined,
+        // These instances produced no output, so they have no instance rows to list.
+        href: buildHref(`/runs/${ctx.run.run_id}`, { tab: "tasks", task: t.task_name }),
+      });
+    }
+    const sf = t.scoring_failures;
+    if (sf && (sf.instances_unscored || sf.instances_partially_scored)) {
+      const processed = Math.max(1, t.instances_processed ?? t.n);
+      const parts: string[] = [];
+      if (sf.instances_unscored) parts.push(`${formatCount(sf.instances_unscored)}/${formatCount(t.instances_processed ?? t.n)} instances could not be scored (${formatRate(sf.instances_unscored / processed, 1)})`);
+      if (sf.instances_partially_scored) parts.push(`${formatCount(sf.instances_partially_scored)} scored from part of their outputs`);
+      const types = Object.entries(sf.by_type).map(([k, v]) => `${k} ×${v}`).join(", ");
+      items.push({
+        icon: <AlertTriangle />,
+        tone: s.warn,
+        text: (
+          <>
+            <strong>{t.task_name}</strong>: {parts.join("; ")}
+          </>
+        ),
+        detail: [types, sf.first_error].filter(Boolean).join(" · ") || undefined,
         href: buildHref(`/runs/${ctx.run.run_id}`, { tab: "instances", task: t.task_name, has: "scoring_error" }),
       });
     }
@@ -388,7 +412,7 @@ function HealthPanel({ ctx }: { ctx: RunCtx }) {
       tone: s.warn,
       text: (
         <>
-          {formatRate(t.truncation_rate, 0)} of <strong>{t.task_name}</strong> outputs hit max length
+          {formatRate(t.truncation_rate, 0)} of <strong>{t.task_name}</strong> stored instances have a sample that hit max length
         </>
       ),
       href: buildHref(`/runs/${ctx.run.run_id}`, { tab: "instances", task: t.task_name, fin: "length" }),
@@ -491,7 +515,7 @@ export function Provenance({ run }: { run: RunDetail }) {
             ["Startup", run.startup_seconds != null ? formatRuntime(run.startup_seconds) : <span className="muted">not recorded</span>],
             ["Processing", run.processing_seconds != null ? formatRuntime(run.processing_seconds) : <span className="muted">{run.startup_seconds != null && !run.finished_at ? "in progress" : "not recorded"}</span>],
             ["olmo-eval", run.olmo_eval_version ? <span className="mono">{run.olmo_eval_version} @ {shortHash(run.git.commit)}</span> : null],
-            ["Stack", <span className="mono" style={{ fontSize: 11.5 }}>{["vllm", "torch", "transformers"].filter((p) => env.packages[p]).map((p) => `${p} ${env.packages[p]}`).join(" · ") || "—"}</span>],
+            ["Stack", <span className="mono" style={{ fontSize: 11.5 }}>{formatStack(env.packages) || "—"}</span>],
             ["Results", <CopyText text={run.gcs_prefix} display={<span className="mono" style={{ fontSize: 11.5 }}>{run.gcs_prefix}</span>} />],
           ]}
         />

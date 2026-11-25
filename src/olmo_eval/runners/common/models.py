@@ -41,12 +41,19 @@ class TaskMetricsEntry(Serializable):
     instances_processed: int | None = None
     instances_failed: int | None = None
     error_summary: str | None = None
+    # How the saved generations ended; see TaskResult.generation_counts.
+    generation_counts: dict[str, int] | None = None
+    # Outputs and instances whose scores could not be computed; see TaskResult.
+    scoring_failures: dict[str, Any] | None = None
     # Per-task cost; see TASK_COST_KEYS in runners/common/types.py
     first_request_at: str | None = None
     last_completed_at: str | None = None
     prompt_tokens_total: int | None = None
     completion_tokens_total: int | None = None
     attributed_inference_seconds: float | None = None
+    scoring_judge_seconds: float | None = None
+    scoring_sandbox_seconds: float | None = None
+    scoring_compute_seconds: float | None = None
 
 
 @dataclass
@@ -59,6 +66,7 @@ class ScoreSummary(Serializable):
 
     metric: str  # Format: "metric_name:scorer_name"
     score: float
+    generation_counts: dict[str, int] | None = None  # suites only
 
 
 @dataclass
@@ -70,6 +78,7 @@ class MetricsOutput(Serializable):
     tasks: list[dict[str, Any]]  # List of TaskMetricsEntry.to_dict()
     summary: dict[str, Any]  # task_name -> ScoreSummary or model -> task -> ScoreSummary
     errors: list[dict[str, Any]] = field(default_factory=list)
+    suite_metrics: dict[str, Any] | None = None
     # Experiment identification fields for querying results
     experiment_id: str | None = None
     experiment_name: str | None = None
@@ -81,3 +90,4 @@ class MetricsOutput(Serializable):
     startup_seconds: float | None = None
     processing_started_at: str | None = None
     processing_seconds: float | None = None
+    task_specs: list[str] | None = None

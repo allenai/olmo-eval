@@ -31,7 +31,7 @@ DisplayFormat = Literal["percent", "raw"]
 MetricKind = Literal["binary", "bounded", "unbounded"]
 ModelId = Annotated[str, Field(pattern="^[0-9a-f]{12}$")]
 RunId = Annotated[str, Field(pattern="^[a-z0-9]{6,32}$")]
-RunStatus = Literal["running", "complete", "partial", "failed"]
+RunStatus = Literal["running", "interrupted", "complete", "partial", "failed"]
 RuntimeBasis = Literal["measured", "attributed", "estimated", "not_recorded"]
 RuntimeMode = Literal["inference", "with_startup"]
 SearchResultType = Literal["run", "model", "task", "suite", "group", "user", "id"]
@@ -180,6 +180,7 @@ class DeltaStats(_Response):
 class BaselineCell(_Response):
     contingency: Contingency | None
     delta: DeltaStats
+    generation_counts: dict[str, int] | None = Field(default=None)
     metrics: dict[str, float | None]
     n: int
     run_id: RunId
@@ -636,6 +637,9 @@ class TaskRuntime(_Response):
     completion_tokens_total: int | None
     inference_seconds: float | None
     prompt_tokens_total: int | None
+    scoring_compute_seconds: float | None
+    scoring_judge_seconds: float | None
+    scoring_sandbox_seconds: float | None
     seconds_per_1k_instances: float | None
     span_end_s: float | None
     span_start_s: float | None
@@ -1014,6 +1018,7 @@ class RunRow(_Response):
 
 class SuiteBaselineCell(_Response):
     delta: DeltaStats
+    generation_counts: dict[str, int] | None = Field(default=None)
     score: float | None
     stderr: float | None
 
@@ -1025,6 +1030,7 @@ class SuiteResultRow(_Response):
     depth: int
     description: str | None
     display_format: DisplayFormat
+    generation_counts: dict[str, int] | None = Field(default=None)
     higher_is_better: bool | None
     n_instances: int
     name: str
@@ -1043,6 +1049,17 @@ class RunSuitesResponse(_Response):
     unsuited_tasks: list[str]
 
 
+class ScoringFailures(_Response):
+    """A task's scoring failures. An unscored instance has no scored output and is left out of the metrics; with instances that produced no output it counts against the task's failure budget. A partially scored instance is scored from the outputs that were."""
+
+    by_type: dict[str, int]
+    first_error: str | None = Field(default=None)
+    infrastructure: int
+    instances_partially_scored: int
+    instances_unscored: int
+    outputs_unscored: int
+
+
 class TaskResultRow(_Response):
     base_task: str | None
     baseline: BaselineCell | None
@@ -1051,6 +1068,7 @@ class TaskResultRow(_Response):
     error: str | None
     error_summary: dict[str, Any] | None
     finish_reason_counts: dict[str, int]
+    generation_counts: dict[str, int] | None = Field(default=None)
     instance_scale: float
     instances_failed: int | None
     instances_processed: int | None
@@ -1068,6 +1086,7 @@ class TaskResultRow(_Response):
     runtime: TaskRuntime
     score: float | None
     score_is_mean: bool
+    scoring_failures: ScoringFailures | None = Field(default=None)
     split: str | None
     stderr: float | None
     suites: list[str]

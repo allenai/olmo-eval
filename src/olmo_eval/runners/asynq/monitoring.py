@@ -5,13 +5,39 @@ from __future__ import annotations
 import multiprocessing as mp
 import queue
 import time
+from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.logging import get_logger
-from olmo_eval.runners.asynq.types import WORKER_FATAL
+from olmo_eval.runners.asynq.types import WORKER_FATAL, WorkerReady
+
+if TYPE_CHECKING:
+    from olmo_eval.harness.config import ProviderConfig
 
 logger = get_logger(__name__)
 
 DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+
+
+def provider_init_timeout(provider: ProviderConfig) -> float:
+    """Return how long to wait for inference workers to initialize a provider.
+
+    A provider ``startup_timeout`` bounds only the server's own startup. Workers also
+    spend time outside it, such as re-downloading the model with ``force_download``
+    before the server starts or starting a scaffold's sandboxes once it is ready, so the
+    default wait is added to ``startup_timeout`` rather than replaced by it. A server
+    that fails to start raises at ``startup_timeout`` regardless, so this wait only
+    bounds a worker that hangs.
+
+    Args:
+        provider: Provider configuration the inference workers load.
+
+    Returns:
+        Timeout in seconds for all workers to report their init times.
+    """
+    startup_timeout = provider.kwargs.get("startup_timeout")
+    if startup_timeout is None:
+        return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS
+    return DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS + float(startup_timeout)
 
 
 def terminate_workers(
@@ -144,16 +170,18 @@ def wait_for_init_times(
     result_queue: mp.Queue | None = None,
     timeout: float = DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS,
     check_interval: float = 1.0,
+    worker_configs: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, float]:
     """Wait for all workers to report their initialization times.
 
     Args:
-        init_queue: Queue that workers put (worker_id, init_time) tuples on.
+        init_queue: Queue that workers put WorkerReady messages on.
         num_workers: Expected number of workers.
         workers: Optional list of worker processes to check for crashes.
         result_queue: Optional queue to check for fatal error markers.
         timeout: Maximum time to wait for all init times.
         check_interval: How often to check for new entries.
+        worker_configs: Optional destination for resolved worker configurations.
 
     Returns:
         Dictionary mapping worker_id to init time in seconds.
@@ -171,8 +199,15 @@ def wait_for_init_times(
         # Drain all available init times from the queue
         while True:
             try:
-                worker_id, init_time = init_queue.get_nowait()
-                collected[worker_id] = init_time
+                message = init_queue.get_nowait()
+                if isinstance(message, WorkerReady):
+                    collected[message.worker_id] = message.init_time
+                    if worker_configs is not None:
+                        worker_configs[message.worker_id] = message.harness_config
+                else:
+                    # Compatibility for callers that only report startup timing.
+                    worker_id, init_time = message
+                    collected[worker_id] = init_time
             except queue.Empty:
                 break
 
@@ -195,6 +230,7 @@ def wait_for_init_times(
 
 __all__ = [
     "DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS",
+    "provider_init_timeout",
     "terminate_workers",
     "check_workers_alive",
     "wait_for_workers_ready",

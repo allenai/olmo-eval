@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.images import resolve_images
@@ -16,7 +17,11 @@ from olmo_eval.common.types import (
     SamplingParams,
 )
 from olmo_eval.inference.base import InferenceProvider
-from olmo_eval.inference.request_utils import chat_messages_for_request
+from olmo_eval.inference.request_utils import (
+    chat_messages_for_request,
+    chat_with_images,
+    render_chat,
+)
 from olmo_eval.inference.tokenizer_utils import encode_context_and_continuation
 
 logger = get_logger(__name__)
@@ -302,6 +307,7 @@ class HuggingFaceProvider(InferenceProvider):
         max_crops: int = 24,
         max_multi_image_crops: int = 8,
         autocast_dtype: str | None = None,
+        device: str | None = None,
         **model_kwargs,
     ) -> None:
         """Initialize the provider.
@@ -318,6 +324,9 @@ class HuggingFaceProvider(InferenceProvider):
                 ``torch.autocast`` with this dtype. Pair with fp32 weights (``dtype="float32"``)
                 to match mm_olmo's ``amp_bf16`` eval numerics (fp32 master weights + bf16
                 autocast); the model keeps attention in fp32 via its own ``float32_attention``.
+            device: Torch device to load the model on, such as ``"cuda:1"``. Defaults to
+                the best available device; an auxiliary provider gets the GPU the run
+                set aside for it.
             **model_kwargs: Additional arguments passed to from_pretrained.
         """
         # Strip kwargs meant for other providers (e.g., vLLM)
@@ -331,7 +340,15 @@ class HuggingFaceProvider(InferenceProvider):
         self.max_multi_image_crops = int(max_multi_image_crops)
         self.autocast_dtype = autocast_dtype
         self.processor = None
-        self.device = _get_device()
+        self.is_encoder_decoder: bool = False
+        # generate() is not thread-safe, and the async methods run it in threads
+        self._model_lock = threading.Lock()
+        if device is None:
+            self.device = _get_device()
+        else:
+            import torch
+
+            self.device = torch.device(device)
         if self.is_multimodal:
             self._init_multimodal(model_name, model_kwargs)
         else:
@@ -344,7 +361,12 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> None:
         """Load a text-only causal LM (tokenizer + AutoModelForCausalLM)."""
         try:
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import (
+                AutoConfig,
+                AutoModelForCausalLM,
+                AutoModelForSeq2SeqLM,
+                AutoTokenizer,
+            )
         except ImportError as e:
             raise ImportError(
                 "transformers is required for HuggingFaceProvider. "
@@ -355,8 +377,21 @@ class HuggingFaceProvider(InferenceProvider):
         tokenizer_kwargs = {
             key: value for key, value in model_kwargs.items() if key in self._TOKENIZER_KWARGS
         }
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        self.tokenizer: Any = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
+
+        # Encoder-decoder models (T5, BART, ...) need a different auto-class and
+        # have different generate() semantics, so detect them from the config
+        # rather than requiring callers to declare it.
+        config = AutoConfig.from_pretrained(model_name, **tokenizer_kwargs)
+        self.is_encoder_decoder = bool(getattr(config, "is_encoder_decoder", False))
+        auto_class = AutoModelForSeq2SeqLM if self.is_encoder_decoder else AutoModelForCausalLM
+        logger.info(
+            "Loading %s with %s (is_encoder_decoder=%s)",
+            model_name,
+            getattr(auto_class, "__name__", auto_class),
+            self.is_encoder_decoder,
+        )
+        self.model: Any = auto_class.from_pretrained(model_name, **model_kwargs)
 
     def _init_multimodal(self, model_name: str, model_kwargs: dict[str, Any]) -> None:
         """Load an image-text-to-text model (AutoProcessor + AutoModelForImageTextToText).
@@ -449,27 +484,13 @@ class HuggingFaceProvider(InferenceProvider):
         """Build processor chat messages, injecting images into the user turn.
 
         Mirrors the released Molmo2 HF eval: a single user turn whose content is
-        the image(s) followed by the question text. A system message (if present)
-        is preserved as a text-only turn; images attach to the first user turn.
+        the image(s) followed by the question text, unless the request places its
+        images with ``{"type": "image"}`` parts. A system message (if present) is
+        preserved as a text-only turn; :func:`render_chat` drops it only for a chat
+        template that rejects it.
         """
         image_parts = [{"type": "image", "image": img} for img in (images or ())]
-        messages = chat_messages_for_request(request)
-
-        chat: list[dict[str, Any]] = []
-        attached = False
-        for msg in messages:
-            role = msg.get("role", "user")
-            text = msg.get("content", "") or ""
-            if role == "user" and not attached and image_parts:
-                chat.append(
-                    {"role": role, "content": [*image_parts, {"type": "text", "text": text}]}
-                )
-                attached = True
-            else:
-                chat.append({"role": role, "content": [{"type": "text", "text": text}]})
-        if not attached and image_parts:
-            chat.insert(0, {"role": "user", "content": image_parts})
-        return chat
+        return chat_with_images(chat_messages_for_request(request), image_parts)
 
     def _generate_multimodal(
         self, requests: list[LMRequest], params: SamplingParams
@@ -504,8 +525,11 @@ class HuggingFaceProvider(InferenceProvider):
                     img = img.convert("RGB")
                 pil_images.append(img)
 
-            text = self.processor.apply_chat_template(
-                chat, tokenize=False, add_generation_prompt=True
+            text = render_chat(
+                lambda c: self.processor.apply_chat_template(
+                    c, tokenize=False, add_generation_prompt=True
+                ),
+                chat,
             )
             if pil_images:
                 max_crops = self.max_crops if len(pil_images) == 1 else self.max_multi_image_crops
@@ -565,13 +589,19 @@ class HuggingFaceProvider(InferenceProvider):
                 with torch.no_grad():
                     output_ids = self.model.generate(**encoded, **gen_kwargs)[0]
 
-                gen_ids = output_ids[prompt_len:]
+                # A causal LM returns the prompt followed by the continuation, so
+                # the prompt has to be sliced off. An encoder-decoder returns only
+                # decoder tokens, and slicing would eat the answer.
+                gen_ids = output_ids if self.is_encoder_decoder else output_ids[prompt_len:]
                 gen_ids, text = self._truncate_at_stop(gen_ids, params.stop_sequences)
 
                 # Always compute logprobs for metrics
                 logprob_entries = None
                 metadata: dict[str, Any] = {}
-                if len(gen_ids) > 0:
+                # the scoring below reads logits at prompt-relative positions of a
+                # single concatenated sequence, which only holds for a causal LM;
+                # encoder-decoder logprobs would need a decoder-side forward pass
+                if len(gen_ids) > 0 and not self.is_encoder_decoder:
                     seq = torch.cat([encoded["input_ids"][0], gen_ids]).unsqueeze(0)
                     with torch.no_grad():
                         logits = self.model(seq).logits
@@ -703,7 +733,8 @@ class HuggingFaceProvider(InferenceProvider):
     ) -> list[list[LMOutput]]:
         """Async generate completions.
 
-        Runs the synchronous HuggingFace generate in a thread pool to avoid blocking.
+        Runs the synchronous HuggingFace generate in a thread pool to avoid blocking,
+        one call at a time, so concurrent scorers can share an auxiliary provider.
 
         Args:
             requests: Batch of requests to process.
@@ -712,7 +743,7 @@ class HuggingFaceProvider(InferenceProvider):
         Returns:
             List of output lists, one per request.
         """
-        return await asyncio.to_thread(self.generate, requests, sampling_params)
+        return await asyncio.to_thread(self._locked, self.generate, requests, sampling_params)
 
     async def alogprobs(
         self,
@@ -729,4 +760,9 @@ class HuggingFaceProvider(InferenceProvider):
         Returns:
             List of output lists with logprobs populated.
         """
-        return await asyncio.to_thread(self.logprobs, requests, sampling_params)
+        return await asyncio.to_thread(self._locked, self.logprobs, requests, sampling_params)
+
+    def _locked(self, method: Any, *args: Any) -> Any:
+        """Call a model method while holding the model lock."""
+        with self._model_lock:
+            return method(*args)

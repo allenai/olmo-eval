@@ -21,13 +21,20 @@ from olmo_eval_api.services.common import latest_by_task, now_utc
 from olmo_eval_api.services.instances import INSTANCE_SORTS, InstanceFilters, query_instances
 from olmo_eval_api.services.links import gcs_console_url, run_links, split_gs_uri
 from olmo_eval_api.services.queries import (
+    VISIBLE,
     clamp_limit,
     fetch_models,
     fetch_run_rows,
     model_ref,
     run_summary,
 )
-from olmo_eval_api.services.read_suites import definition_hashes, load_defs, score_suite, tree
+from olmo_eval_api.services.read_suites import (
+    definition_hashes,
+    load_defs,
+    score_suite,
+    suite_generation_counts,
+    tree,
+)
 from olmo_eval_api.services.runtime import RunTiming, derive_runtime, load_run_timings
 from olmo_eval_api.services.subjects import (
     TR_COLUMNS,
@@ -37,7 +44,7 @@ from olmo_eval_api.services.subjects import (
     resolve_one,
     run_task_results,
 )
-from olmo_eval_api.services.suites import leaf_weights, leaves
+from olmo_eval_api.services.suites import NO_SCORE_AGGREGATIONS, leaf_weights, leaves
 from olmo_eval_api.stats.histograms import box_stats, histogram
 from olmo_eval_api.stats.paired import (
     Delta,
@@ -91,7 +98,8 @@ async def run_task_results_endpoint(
 ) -> a.RunTaskResultsResponse:
     run = await _run_row(session, run_id)
     sql = f"""
-        SELECT {TR_COLUMNS}, tr.error_summary, tr.mean_completion_tokens, tr.truncation_rate,
+        SELECT {TR_COLUMNS}, tr.error_summary, tr.scoring_failures,
+               tr.mean_completion_tokens, tr.truncation_rate,
                tr.finish_reason_counts, tr.predictions_path, tr.requests_path,
                tv.base_task, tv.num_fewshot, tv.task_limit, tv.split, tv.suites
         FROM task_results tr
@@ -104,7 +112,7 @@ async def run_task_results_endpoint(
         subject = await resolve_one(session, baseline)
     used = list(trs) + (list(subject.trs.values()) if subject else [])
     key = cache_key(
-        "run-task-results",
+        "run-task-results-v3",
         {"run_id": run_id, "baseline": baseline, **stats.__dict__},
         used,
     )
@@ -151,6 +159,7 @@ async def run_task_results_endpoint(
                     stderr=side_b.stderr,
                     n=int(base["num_instances"] or 0),
                     metrics=base["metrics"] or {},
+                    generation_counts=base.get("generation_counts"),
                     delta=delta_model(d),
                     contingency=a.Contingency(**cont) if cont else None,
                 )
@@ -174,6 +183,8 @@ async def run_task_results_endpoint(
             n=int(tr["num_instances"] or 0),
             instances_processed=tr["instances_processed"],
             instances_failed=tr["instances_failed"],
+            generation_counts=tr["generation_counts"],
+            scoring_failures=tr["scoring_failures"],
             instances_stored=int(tr["instances_stored"] or 0),
             metrics=tr["metrics"] or {},
             error=tr["error"],
@@ -219,6 +230,12 @@ def suite_delta(
     corpus_delta: float | None,
     higher_is_better: bool | None,
 ) -> a.DeltaStats:
+    if node.aggregation in NO_SCORE_AGGREGATIONS or (
+        node.aggregation == "gap" and corpus_delta is None
+    ):
+        return accumulator_delta(
+            PairAccumulator(n_boot=stats.n_boot), stats, None, higher_is_better
+        )
     tasks = []
     for name in leaves(node):
         tr, base = run_trs.get(name), base_trs.get(name)
@@ -233,6 +250,7 @@ def suite_delta(
         tasks,
         [("a", "b")],
         lambda names: leaf_weights(node, n_inst, set(names)),
+        qualifying_weight_fn=lambda q, p: leaf_weights(node, n_inst, set(q), score_present=set(p)),
         alpha=stats.alpha,
         n_boot=stats.n_boot,
         seed=stats.seed,
@@ -305,7 +323,7 @@ async def run_suites(
     }
     defs = {**(await load_defs(session)), **stored_defs}
     key = cache_key(
-        "run-suites",
+        "run-suites-v7",
         {"run_id": run_id, "baseline": baseline, **stats.__dict__},
         trs_list + (list(subject.trs.values()) if subject else []),
         definition_hashes([tree(r["suite_name"], defs) for r in ordered], defs),
@@ -334,7 +352,22 @@ async def run_suites(
         def build_base_cells() -> None:
             for r in ordered:
                 node = tree(r["suite_name"], defs)
-                agg = score_suite(node, base_trs)
+                metric_keys = {
+                    name: run_trs[name]["primary_metric"] if name in run_trs else None
+                    for name in leaves(node)
+                }
+                baseline_sides = {
+                    name: loader.side(base_trs.get(name), key) for name, key in metric_keys.items()
+                }
+                scores = {
+                    name: side.score if side is not None else None
+                    for name, side in baseline_sides.items()
+                }
+                stderrs = {
+                    name: side.stderr if side is not None else None
+                    for name, side in baseline_sides.items()
+                }
+                agg = score_suite(node, base_trs, scores, stderrs, metric_keys=metric_keys)
                 corpus = (
                     r["score"] - agg.score
                     if r["score"] is not None and agg.score is not None
@@ -344,7 +377,10 @@ async def run_suites(
                     run_trs, base_trs, node, loader, stats, corpus, r["higher_is_better"]
                 )
                 base_cells[r["suite_name"]] = a.SuiteBaselineCell(
-                    score=agg.score, stderr=agg.stderr, delta=delta
+                    score=agg.score,
+                    stderr=agg.stderr,
+                    delta=delta,
+                    generation_counts=suite_generation_counts(node, base_trs),
                 )
 
         # Bootstraps are CPU-bound; a worker thread keeps the event loop serving other requests.
@@ -370,6 +406,7 @@ async def run_suites(
                 n_instances=int(r["n_instances"] or 0),
                 display_format=r["display_format"],
                 higher_is_better=r["higher_is_better"],
+                generation_counts=suite_generation_counts(node, run_trs),
                 tasks_missing=list(r["tasks_missing"] or []),
                 baseline=base_cell,
             )
@@ -1087,8 +1124,7 @@ async def baseline_suggestions(
     if run["experiment_group"]:
         same_group = await fetch_run_rows(
             session,
-            "r.experiment_group = :g AND r.run_id <> :r AND "
-            "(r.upload_state = 'complete' OR r.status = 'running')",
+            f"r.experiment_group = :g AND r.run_id <> :r AND {VISIBLE}",
             {"g": run["experiment_group"], "r": run_id},
             limit=3,
         )

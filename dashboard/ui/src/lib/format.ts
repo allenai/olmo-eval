@@ -1,4 +1,12 @@
-import type { DisplayFormat } from "@contract/api-types";
+import type { DisplayFormat, TaskResultRow } from "@contract/api-types";
+
+export function formatGenerationCounts(counts: TaskResultRow["generation_counts"]): string | null {
+  if (!counts?.generations) return null;
+  const parts = [`cap ${counts.cap_hit ?? 0}/${counts.generations}`, `empty ${counts.empty ?? 0}`];
+  if (counts.unclosed_think) parts.push(`unclosed ${counts.unclosed_think}`);
+  if (counts.finish_reason_unknown) parts.push(`unknown ${counts.finish_reason_unknown}`);
+  return parts.join(" · ");
+}
 
 const MINUS = "−";
 
@@ -167,4 +175,13 @@ export function metricLabel(key: string | null | undefined): string {
 
 export function pluralize(n: number, one: string, many = `${one}s`): string {
   return `${formatCount(n)} ${n === 1 ? one : many}`;
+}
+
+/** The serving stack, preferring the separate vLLM venv's versions when recorded. */
+export function formatStack(packages: Record<string, string>): string {
+  return ["vllm", "torch", "transformers"]
+    .map((name) => [name, packages[`vllm-venv/${name}`] ?? packages[name]] as const)
+    .filter(([, version]) => version)
+    .map(([name, version]) => `${name} ${version}`)
+    .join(" · ");
 }

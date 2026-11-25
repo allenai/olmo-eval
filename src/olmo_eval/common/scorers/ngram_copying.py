@@ -3,6 +3,7 @@
 import math
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 from olmo_eval.common.types import Instance, LMOutput
 
@@ -42,6 +43,7 @@ class NGramCopyingBPBScorer(Scorer):
 
     name: str = field(init=False)
     k: int = 1
+    reads_logprobs: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", f"ngram_copying_bpb_k{self.k}")

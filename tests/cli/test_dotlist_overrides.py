@@ -60,6 +60,13 @@ class TestParseOverrideValue:
     def test_float(self):
         assert _parse_override_value("0.6") == 0.6
 
+    def test_null(self):
+        assert _parse_override_value("null") is None
+        assert _parse_override_value("NULL") is None
+
+    def test_none_stays_a_string(self):
+        assert _parse_override_value("none") == "none"
+
     def test_string(self):
         assert _parse_override_value("modal") == "modal"
 

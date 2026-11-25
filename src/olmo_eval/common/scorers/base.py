@@ -42,6 +42,9 @@ class Scorer(ABC):
 
     name: str = ""
     requires_async: ClassVar[bool] = False
+    #: Scores from an output's per-token logprobs. Metrics with such a scorer read them
+    #: when they are computed, so resumable runs keep them in their progress records.
+    reads_logprobs: ClassVar[bool] = False
 
     def __call__(self) -> Scorer:
         """Allow scorer instances to be used where classes are expected.
@@ -78,6 +81,9 @@ class ProcessScorer(Scorer):
     def process_score(self, instance: Instance, output: LMOutput) -> float:
         """Score a single output in a subprocess."""
         ...
+
+    def warmup(self) -> None:
+        """Load what ``process_score`` needs, once per worker before any output is timed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +240,7 @@ class BitsPerByteScorer(Scorer):
     """
 
     name: str = "bits_per_byte"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -263,6 +270,7 @@ class PerplexityScorer(Scorer):
     """
 
     name: str = "perplexity"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -288,6 +296,7 @@ class LogprobScorer(Scorer):
     """
 
     name: str = "logprob"
+    reads_logprobs: ClassVar[bool] = True
 
     def score(self, instance: Instance, output: LMOutput) -> float:
         if output.logprobs is None:
@@ -361,6 +370,11 @@ class MinervaMathScorer(ProcessScorer):
     """
 
     name: str = "minerva_math_flex"
+
+    def warmup(self) -> None:
+        from olmo_eval.evals.extract.math import is_equiv
+
+        is_equiv("1/2", "0.5")  # imports and first-call setup in sympy
 
     def process_score(self, instance: Instance, output: LMOutput) -> float:
         from olmo_eval.evals.extract.math import is_equiv

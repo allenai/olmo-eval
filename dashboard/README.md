@@ -51,8 +51,11 @@ recorded as the run's uploader.
   (`infra/terraform/uploader.tf`). `olmo-eval beaker launch` reads its key from the Secret
   Manager secret `olmo-eval-uploader-key` with the launching user's local credentials and copies
   it into the workspace's `olmo_eval_uploader_key` Beaker secret, which the job reads as
-  `OLMO_EVAL_UPLOAD_CREDENTIALS`. The CLI moves the key out of the environment as it starts, so
-  inference servers, sandboxes and other subprocesses never see it. Personal credentials never
+  `OLMO_EVAL_UPLOAD_CREDENTIALS`. When the local credentials are missing or need
+  reauthentication, a launch with uploads on into a workspace that already holds that secret
+  warns and reuses it, so agents and other non-interactive launchers still upload. Without
+  local credentials, uploads are on only with `--upload`. The CLI moves the key out of the
+  environment as it starts, so inference servers, sandboxes and other subprocesses never see it. Personal credentials never
   reach Beaker. The run's `author`
   is the launching Beaker user, and only that user (or a direct uploader) can delete it;
   service accounts cannot delete runs. A re-upload keeps the stored author unless it comes from
@@ -128,9 +131,9 @@ service runs as `olmo-eval-api`, which owns the tables. Ingest runs migrations a
 Postgres advisory lock, and the startup probe holds traffic until they finish. A final smoke test fails the deploy unless the prod ingest service's `/health`
 reports the merged commit with a working database, and the dashboard redirects to Google sign-in.
 
-Pull requests get a Skiff2 Terraform plan (`skiff2-plan.yml`; skipped for fork PRs, which cannot
-authenticate to GCP) and the dashboard checks (`dashboard-ci.yml`: API and UI tests, plus Docker
-builds of both images).
+Pull requests get the dashboard checks (`dashboard-ci.yml`: API and UI tests, plus Docker builds
+of both images). They get no Skiff2 plan: the project's Workload Identity Federation only issues
+GCP tokens to workflows running on `refs/heads/main`.
 
 Containers need no secrets. Configuration comes from code defaults keyed on `SKIFF_ENV`, which
 Cloud Run sets on every container. To allow another service account to upload, create the Secret
@@ -148,8 +151,9 @@ service account has project-wide secret access.
 certificates, Cloud Armor, the `github-actions` service account, Workload Identity Federation).
 
 `.github/workflows/terraform.yml` deploys it continuously: pull requests that touch
-`infra/terraform` get a `terraform plan` against the real project in the job summary, and merging
-to `main` runs `terraform apply`. Both run as Skiff2's `github-actions` service account. To apply
+`infra/terraform` run `terraform fmt` and `terraform validate`, and merging to `main` runs
+`terraform apply` as Skiff2's `github-actions` service account. Pull request workflows can't
+authenticate to the project, so run `terraform plan` locally to preview a change. To apply
 by hand instead:
 
 ```bash
@@ -163,3 +167,11 @@ This needs owner-level access to the project. Apply Terraform before the first d
 `infra/terraform/scripts/grant_db.py` once: the services run as the `olmo-eval-api` and
 `olmo-eval-dashboard` service accounts and connect to the database at startup. The Cloud SQL
 instance has deletion protection on. See `infra/terraform/README.md` for details.
+
+Task truncation rates use stored instances: an instance counts once when any of
+its samples stopped for length. The cap fraction beside a score uses generated
+outputs, counting every sample. A task with no stored predictions has no
+instance truncation rate, even when output diagnostics are available; those
+remain visible beside its score. Unknown finish reasons make the cap count a
+lower bound. Suite diagnostics sum the runner's five counter keys over distinct
+scored task members.

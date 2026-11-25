@@ -57,7 +57,8 @@ export class MockHttpError extends Error {
 export type Query = { get: (key: string) => string | null; getAll: (key: string) => string[] };
 
 const nowIso = () => new Date(NOW).toISOString();
-const visible = (r: MockRun) => r.summary.upload_state === "complete" || r.summary.status === "running";
+const unfinished = (r: MockRun) => r.summary.status === "running" || r.summary.status === "interrupted";
+const visible = (r: MockRun) => r.summary.upload_state === "complete" || unfinished(r);
 
 function tr(id: number): MockTaskResult {
   const found = getWorld().taskResults.get(id);
@@ -80,6 +81,7 @@ function taskRuntime(t: MockTaskResult): T.TaskRuntime {
   const run = getRun(t.runId);
   const rt = t.runtime;
   const recorded = rt.basis !== "not_recorded";
+  const recordsScoring = rt.basis === "attributed" || rt.basis === "measured";
   return {
     inference_seconds: rt.inferenceS,
     basis: rt.basis,
@@ -91,6 +93,11 @@ function taskRuntime(t: MockTaskResult): T.TaskRuntime {
     seconds_per_1k_instances: rt.inferenceS != null && t.n ? (rt.inferenceS / t.n) * 1000 : null,
     span_start_s: rt.spanStart,
     span_end_s: rt.spanEnd,
+    // Only newer clients record scoring times. The work scales with the instance count: judge
+    // calls for judge and omni tasks, sandbox time for code tasks.
+    scoring_judge_seconds: recordsScoring ? (t.task.type === "judge" || t.task.type === "omni" ? Math.round(t.n * 2 * 10) / 10 : 0) : null,
+    scoring_sandbox_seconds: recordsScoring ? (t.task.type === "code" ? Math.round(t.n * 0.8 * 10) / 10 : 0) : null,
+    scoring_compute_seconds: recordsScoring ? Math.round(t.n * 0.01 * 10) / 10 : null,
   };
 }
 
@@ -281,7 +288,7 @@ function filterRuns(q: Query, skip?: string): MockRun[] {
     if (tags.length && !tags.some((t) => s.tags.includes(t))) return false;
     if (notTags.length && notTags.some((t) => s.tags.includes(t))) return false;
     if (statuses.length) {
-      const st = s.status === "running" ? "running" : s.upload_state === "uploading" ? "uploading" : s.status;
+      const st = s.status === "running" || s.status === "interrupted" ? s.status : s.upload_state === "uploading" ? "uploading" : s.status;
       if (!statuses.includes(st) && !statuses.includes(s.status)) return false;
     }
     if (runIds.length && !runIds.includes(s.run_id)) return false;
@@ -414,7 +421,7 @@ export function runsFacets(q: Query): T.RunsFacetsResponse {
     workspace: count("workspace", (r) => [r.summary.beaker_workspace]),
     tag: count("tag", (r) => r.summary.tags),
     status: count("status", (r) => [
-      r.summary.status === "running" ? "running" : r.summary.upload_state === "uploading" ? "uploading" : r.summary.status,
+      unfinished(r) ? r.summary.status : r.summary.upload_state === "uploading" ? "uploading" : r.summary.status,
     ]),
     model: count("model", (r) => [r.summary.model.name]),
   };
@@ -1570,7 +1577,7 @@ function latestPerModel(taskName: string, hash?: string | null, keep: (run: Mock
   const seen = new Set<string>();
   const out: MockTaskResult[] = [];
   for (const run of w.runs) {
-    if (!visible(run) || run.summary.status === "running" || !keep(run)) continue;
+    if (!visible(run) || unfinished(run) || !keep(run)) continue;
     if (seen.has(run.model.model_id)) continue;
     const t = runTRs(run).find((x) => x.task.name === taskName && !x.error && (!hash || x.taskHash === hash));
     if (!t) continue;
@@ -2008,7 +2015,7 @@ export function suiteLeaderboard(q: Query): T.LeaderboardResponse {
   const seen = new Set<string>();
   const rows: { key: string; run: MockRun; s: ReturnType<typeof suiteScore>; children: Record<string, number | null> }[] = [];
   for (const run of w.runs) {
-    if (!visible(run) || run.summary.status === "running" || !keep(run)) continue;
+    if (!visible(run) || unfinished(run) || !keep(run)) continue;
     if (seen.has(run.model.model_id)) continue;
     const r = resolveSubject(`m:${run.model.model_id}`)!;
     const s = suiteScore(name, (t) => r.lookup.get(t));
@@ -2160,7 +2167,7 @@ export function activity(q: Query): T.ActivityResponse {
     const key = run.summary.launch_id ?? `run:${run.summary.run_id}`;
     groups.set(key, [...(groups.get(key) ?? []), run]);
   }
-  const rank: Record<string, number> = { failed: 3, partial: 2, running: 1, complete: 0 };
+  const rank: Record<string, number> = { failed: 4, partial: 3, interrupted: 2, running: 1, complete: 0 };
   const items: T.ActivityItem[] = [...groups.entries()].map(([key, runs]) => {
     const worst = runs.map((r) => r.summary.status).sort((a, b) => rank[b] - rank[a])[0];
     const err = runs.flatMap((r) => r.errors)[0];

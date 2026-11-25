@@ -35,16 +35,21 @@ from olmo_eval.common.constants.infrastructure import (
     BEAKER_DEFAULT_IMAGE,
     BEAKER_DEFAULT_WORKSPACE,
     BEAKER_KNOWN_CLUSTERS,
+    DEFAULT_WEKA_BUCKETS,
     NEW_CLUSTER_ALIASES,
 )
 from olmo_eval.common.repr import hide_unset
+from olmo_eval.launch.beaker.volume import GantryLaunchKwargs
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from beaker import Beaker, BeakerExperiment, BeakerGroup
 
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "DEFAULT_WEKA_BUCKETS",
     "BeakerEnvSecret",
     "BeakerWekaBucket",
     "BeakerJobConfig",
@@ -58,6 +63,8 @@ __all__ = [
     "print_experiment_config",
     "resolve_clusters",
     "validate_min_runtime",
+    "PROTECTED_MIN_RUNTIME",
+    "weka_buckets_with",
 ]
 
 # Rich console for pretty printing
@@ -132,7 +139,11 @@ def print_experiment_config(
 
         min_runtime_ns = context.get("minRuntime")
         if min_runtime_ns is not None:
-            min_runtime = _format_duration(min_runtime_ns // 1_000_000_000)
+            min_runtime = (
+                min_runtime_ns
+                if isinstance(min_runtime_ns, str)
+                else _format_duration(min_runtime_ns // 1_000_000_000)
+            )
             header_lines.append(f"[bold blue]Min runtime:[/] {min_runtime}")
         else:
             preemptible = context.get("preemptible", True)
@@ -322,6 +333,11 @@ class BeakerWekaBucket:
             self.mount = f"/weka/{self.bucket}"
 
 
+def weka_buckets_with(extra: Iterable[str] = ()) -> list[BeakerWekaBucket]:
+    """Return the default Weka buckets plus ``extra``, each mounted once at /weka/<bucket>."""
+    return [BeakerWekaBucket(name) for name in dict.fromkeys((*DEFAULT_WEKA_BUCKETS, *extra))]
+
+
 @hide_unset()
 @dataclass
 class BeakerJobConfig:
@@ -351,6 +367,8 @@ class BeakerJobConfig:
         priority: Job priority level.
         preemptible: Whether the job can be preempted. Ignored and set to None when
             min_runtime is set; combining False with min_runtime raises ValueError.
+            False becomes min_runtime="8h" with preemptible None, which keeps Beaker's
+            auto-resume on.
         min_runtime: Minimum time the job runs before Beaker may preempt it (e.g., "2h").
             Replaces preemptible, which Beaker has deprecated.
         timeout: Job timeout (e.g., "24h", "30m").
@@ -387,13 +405,9 @@ class BeakerJobConfig:
     description: str | None = None
 
     # Storage - defaults include common eval buckets
-    weka_buckets: list[BeakerWekaBucket] = field(
-        default_factory=lambda: [
-            BeakerWekaBucket("oe-training-default"),
-            BeakerWekaBucket("oe-eval-default"),
-            BeakerWekaBucket("oe-adapt-default"),
-        ]
-    )
+    weka_buckets: list[BeakerWekaBucket] = field(default_factory=weka_buckets_with)
+    # Native volume for active task-run state; None keeps Beaker dataset carry-over.
+    resume_volume: str | None = None
     nfs: bool = False
 
     # Environment - defaults include HuggingFace cache on Weka
@@ -451,12 +465,21 @@ class BeakerJobConfig:
     setup_modal_gcp_secret: bool = False
 
     def __post_init__(self) -> None:
+        if self.resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import validate_volume
+
+            validate_volume(self.resume_volume)
         if self.min_runtime is not None:
             if self.preemptible is False:
                 raise ValueError(
                     "preemptible=False cannot be combined with min_runtime; set min_runtime alone"
                 )
             self.min_runtime = validate_min_runtime(self.min_runtime)
+            self.preemptible = None
+        elif self.preemptible is False:
+            # Beaker maps preemptible=False to an 8h min runtime with auto-resume off, so a
+            # preemption after 8h ends the experiment. Ask for the min runtime directly.
+            self.min_runtime = PROTECTED_MIN_RUNTIME
             self.preemptible = None
         elif self.preemptible is None:
             self.preemptible = True
@@ -767,6 +790,9 @@ def _parse_timeout(timeout: str) -> int:
     return total_ns if total_ns else 86400_000_000_000  # Default 24h
 
 
+PROTECTED_MIN_RUNTIME = "8h"
+"""Min runtime that ``preemptible=False`` resolves to (the longest Beaker allows)."""
+
 _MIN_RUNTIME_PATTERN = re.compile(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?")
 
 
@@ -947,6 +973,10 @@ class BeakerLauncher:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_artifact_registry"
             steps.append(f"source {script}")
 
+        # Optional shell snippet run after every package install (e.g. to re-pin a dependency
+        # that a later per-package install changed).  Not exported: it is a command, not a variable.
+        env_exports = dict(env_exports or {})
+        post_install_cmd = env_exports.pop("OLMO_EVAL_RUNTIME_POST_INSTALL_CMD", None)
         # Export additional environment variables (e.g., UV_CACHE_DIR)
         if env_exports:
             for key, value in env_exports.items():
@@ -967,7 +997,9 @@ class BeakerLauncher:
 
             _, flags = parse_install_spec(package)
             extra_flags: list[str] = []
-            if "--index-url" not in flags and "--extra-index-url" not in flags:
+            if "--index-url" not in flags:
+                extra_flags.extend(["--index-url", "https://pypi.org/simple"])
+            if "--extra-index-url" not in flags:
                 extra_flags.extend(["--extra-index-url", runtime_torch_index_url])
             if "--index-strategy" not in flags:
                 extra_flags.extend(["--index-strategy", "unsafe-best-match"])
@@ -980,6 +1012,18 @@ class BeakerLauncher:
         # overridden packages are symlinked into /opt/vllm-venv below.
         if runtime_torch_version:
             steps.append(build_install_command(runtime_torch_spec(), force_reinstall=True))
+            # Companion packages that must change build together with torch (torchvision/torchaudio
+            # carry the CUDA variant too); otherwise the image's builds end up in the constraints
+            # and conflict with the provider's pins.  Space-separated specs, same index as torch.
+            for extra_spec in (
+                (env_exports or {}).get("OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES") or ""
+            ).split():
+                spec = (
+                    f"{extra_spec} --index-url {runtime_torch_index_url}"
+                    if runtime_torch_index_url
+                    else extra_spec
+                )
+                steps.append(build_install_command(spec, force_reinstall=True))
 
         # Generate constraints from pre-installed CUDA packages to prevent uv from changing them.
         # CUTLASS DSL is the exception: vLLM pins this package independently of
@@ -1064,6 +1108,9 @@ class BeakerLauncher:
             for pkg in task_packages:
                 steps.append(build_install_command(pkg, constraints))
 
+        if post_install_cmd:
+            steps.append(post_install_cmd)
+
         # Set up Modal secret for GCP Artifact Registry (Modal sandboxes)
         if setup_modal_gcp_secret:
             script = "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/setup_modal_gcp_secret"
@@ -1091,6 +1138,8 @@ class BeakerLauncher:
             "UV_CACHE_DIR",
             "OLMO_EVAL_RUNTIME_TORCH_VERSION",
             "OLMO_EVAL_RUNTIME_TORCH_INDEX_URL",
+            "OLMO_EVAL_RUNTIME_TORCH_EXTRA_PACKAGES",
+            "OLMO_EVAL_RUNTIME_POST_INSTALL_CMD",
         )
         for key in install_env_keys:
             if key in config.env_vars:
@@ -1176,7 +1225,7 @@ class BeakerLauncher:
             self._print_dry_run_config(config, clusters)
 
         # Launch the experiment (or show spec if dry_run)
-        workload = launch_experiment(
+        launch_kwargs: GantryLaunchKwargs = dict(
             args=config.command,
             name=config.name,
             description=config.description,
@@ -1207,6 +1256,22 @@ class BeakerLauncher:
             ),  # only way to follow the experiment without canceling
             yes=True,  # Skip confirmation prompts
         )
+
+        if config.resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import launch_with_volume
+
+            experiment_id = launch_with_volume(
+                launch_experiment, launch_kwargs, config.resume_volume, dry_run=dry_run
+            )
+            if experiment_id is None:
+                return None
+            experiment = self.beaker.workload.get(experiment_id).experiment
+            log.info(f"Experiment submitted: {self.experiment_url(experiment)}")
+            if config.follow:
+                self.follow_experiment(experiment_id)
+            return experiment
+
+        workload = launch_experiment(**launch_kwargs)
 
         if dry_run:
             return None

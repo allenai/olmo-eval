@@ -14,18 +14,22 @@ from olmo_eval.common.formatters import ChatFormatter, CompletionFormatter
 from olmo_eval.common.metrics import (
     AccuracyMetric,
     MacroSubsetAccuracyMetric,
-    SafetyErrorMetric,
     SubsetAccuracyMetric,
 )
 from olmo_eval.common.scorers import SafetyScorer
+from olmo_eval.common.scorers.llm_judge import SAFETY_JUDGE
 from olmo_eval.common.types import Instance, LMRequest, RequestType, SamplingParams
 from olmo_eval.data import DataLoader, DataSource
 from olmo_eval.evals.extract import extract_think_answer, extract_think_answer_only
-from olmo_eval.evals.tasks.common import Task, register_variant
+from olmo_eval.evals.tasks.common import Task, TaskConfig, register_variant
+from olmo_eval.evals.tasks.common.judge import grade_with_config_judge
 
 logger = logging.getLogger(__name__)
 
-judge_sampling = SamplingParams(max_tokens=32768, temperature=0.6, top_p=0.95)
+#: Model the ``wg_judge`` provider must serve.
+WILDGUARD_JUDGE_MODEL = "allenai/wildguard"
+
+judge_sampling = SamplingParams(max_tokens=None, temperature=0.6, top_p=0.95)
 base_sampling = SamplingParams(
     max_tokens=1024,
     temperature=0.6,
@@ -43,6 +47,12 @@ class SafetyBase(Task):
     sampling_params: SamplingParams = judge_sampling
     formatter = ChatFormatter()
     answer_extractor = extract_think_answer
+
+    def __init__(self, config: TaskConfig) -> None:
+        """Build the task, grading with the API judge its config names."""
+        super().__init__(
+            grade_with_config_judge(config, SafetyScorer, SAFETY_JUDGE, "SafetyJudgeScorer")
+        )
 
     @property
     def instances(self) -> Iterator[Instance]:
@@ -88,7 +98,6 @@ def safety_metrics(scorer, subsets: tuple[str, ...], macro_subsets: tuple[str, .
     """
     metrics = (
         AccuracyMetric(scorer=scorer),
-        SafetyErrorMetric(scorer=scorer),
         *(SubsetAccuracyMetric(name=name, scorer=scorer) for name in subsets),
     )
     if macro_subsets:
@@ -112,12 +121,16 @@ def register_safety_variants(
     scorer=None,
     scorer_name=None,
     macro_subsets: tuple[str, ...] = (),
+    judge_model: str = WILDGUARD_JUDGE_MODEL,
 ):
     """
     Build the four variants that the base wildguard safety tasks use.
 
     ``macro_subsets`` makes the primary metric an unweighted mean over those
     subsets instead of an instance-weighted mean across the whole task.
+    ``judge_model`` is the model the judge provider must serve; it is recorded in
+    the config of the variants that judge with that provider, so it reaches their
+    task hash, and the runner checks it against the harness before generating.
     """
 
     # Initialize the safety scorer
@@ -144,6 +157,8 @@ def register_safety_variants(
         primary_metric=primary_metric(SafetyScorer),
         sampling_params=judge_sampling,
         required_secrets=("OPENAI_API_KEY",),
+        judge_model=SAFETY_JUDGE.model,
+        judge_max_tokens=SAFETY_JUDGE.max_tokens,
     )
 
     register_variant(
@@ -152,6 +167,7 @@ def register_safety_variants(
         metrics=safety_metrics(scorer, subsets, macro_subsets),
         primary_metric=primary_metric(scorer),
         sampling_params=judge_sampling,
+        judge_model=judge_model,
     )
 
     register_variant(
@@ -161,6 +177,7 @@ def register_safety_variants(
         primary_metric=primary_metric(scorer),
         sampling_params=judge_sampling,
         answer_extractor=extract_think_answer_only,
+        judge_model=judge_model,
     )
 
     register_variant(
@@ -170,4 +187,5 @@ def register_safety_variants(
         primary_metric=primary_metric(scorer),
         sampling_params=base_sampling,
         formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
+        judge_model=judge_model,
     )

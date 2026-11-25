@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
-from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
+from olmo_eval.common.types import (
+    CONTEXT_CUT_TOKENS_KEY,
+    ContextFit,
+    LMOutput,
+    LMRequest,
+    RequestType,
+    SamplingParams,
+)
 from olmo_eval.inference.errors import is_context_overflow_output, request_error
 from olmo_eval.inference.providers.vllm_server import VLLMServerProvider
 
@@ -91,3 +100,127 @@ async def test_any_other_failure_still_raises() -> None:
 
 def test_a_successful_reply_is_not_overflow() -> None:
     assert not is_context_overflow_output([LMOutput(text="ok")])
+
+
+class WordTokenizer:
+    """One token per whitespace-separated word, with character offsets."""
+
+    def __call__(self, text, add_special_tokens=True, return_offsets_mapping=False):  # noqa: ANN001, ANN204
+        import re
+
+        return {"offset_mapping": [m.span() for m in re.finditer(r"\S+", text)]}
+
+
+class CuttingProvider:
+    """The context cutting with the server's /tokenize stubbed by a word count."""
+
+    _CONTEXT_FIT_PASSES = VLLMServerProvider._CONTEXT_FIT_PASSES
+    _fit_context = VLLMServerProvider._fit_context
+
+    #: Words the chat template adds around a message.
+    TEMPLATE_TOKENS = 3
+
+    def __init__(self, max_length: int | None) -> None:
+        self.max_length = max_length
+
+    def _get_tokenizer(self, *, require_local: bool = False):  # noqa: ANN202
+        assert require_local, "offsets need the local tokenizer"
+        return WordTokenizer()
+
+    async def _count_request_tokens(self, request: LMRequest) -> int:
+        if request.messages:
+            words = sum(len(m["content"].split()) for m in request.messages)
+            return words + self.TEMPLATE_TOKENS
+        return len(request.prompt.split())
+
+
+CONTEXT = "one two three four five six seven eight"
+
+
+def _completion(budget: int | None = None) -> LMRequest:
+    return LMRequest(
+        request_type=RequestType.COMPLETION,
+        prompt=f"Read this. {CONTEXT} Question: q\nAnswer:",
+        context_fit=ContextFit(text=CONTEXT, max_prompt_tokens=budget),
+    )
+
+
+@pytest.mark.anyio
+async def test_a_prompt_within_budget_is_sent_unchanged() -> None:
+    request = _completion(budget=100)
+
+    fitted, cut = await CuttingProvider(max_length=None)._fit_context(request, SamplingParams())
+
+    assert (fitted, cut) == (request, 0)
+
+
+@pytest.mark.anyio
+async def test_the_overflow_is_cut_from_the_end_of_the_context() -> None:
+    # 13 words against a budget of 10: the last three context words go, and the
+    # instruction before the context and the question after it survive. As in
+    # HELMET's slicing, the cut lands where the first dropped token starts.
+    fitted, cut = await CuttingProvider(max_length=None)._fit_context(
+        _completion(budget=10), SamplingParams()
+    )
+
+    assert cut == 3
+    assert fitted.prompt == "Read this. one two three four five  Question: q\nAnswer:"
+
+
+@pytest.mark.anyio
+async def test_the_window_caps_the_budget_after_the_generation() -> None:
+    # a 20-token window with 8 tokens to generate leaves room for 12
+    fitted, cut = await CuttingProvider(max_length=20)._fit_context(
+        _completion(budget=100), SamplingParams(max_tokens=8)
+    )
+
+    assert cut == 1
+    assert len(fitted.prompt.split()) == 12
+
+
+@pytest.mark.anyio
+async def test_a_chat_request_is_counted_with_its_template() -> None:
+    request = LMRequest(
+        request_type=RequestType.CHAT,
+        messages=({"role": "user", "content": f"Read this. {CONTEXT} Question: q"},),
+        context_fit=ContextFit(text=CONTEXT, max_prompt_tokens=10),
+    )
+
+    fitted, cut = await CuttingProvider(max_length=None)._fit_context(request, SamplingParams())
+
+    # 12 words plus 3 template tokens against 10
+    assert cut == 5
+    assert fitted.messages[0]["content"] == "Read this. one two three  Question: q"
+
+
+@pytest.mark.anyio
+async def test_text_that_is_not_in_the_prompt_is_refused() -> None:
+    request = replace(
+        _completion(budget=1), context_fit=ContextFit(text="missing", max_prompt_tokens=1)
+    )
+
+    with pytest.raises(ValueError, match="exactly once"):
+        await CuttingProvider(max_length=None)._fit_context(request, SamplingParams())
+
+
+class RecordingProvider:
+    """Generation with the cutting and the server call stubbed out."""
+
+    _generate_single_impl = VLLMServerProvider._generate_single_impl
+    _uses_completions = staticmethod(VLLMServerProvider._uses_completions)
+
+    def _get_or_create_client(self):  # noqa: ANN202
+        return None
+
+    async def _fit_context(self, request, params):  # noqa: ANN001, ANN202
+        return request, 4
+
+    async def _generate_completion(self, client, request, params):  # noqa: ANN001, ANN202
+        return [LMOutput(text="a"), LMOutput(text="b")]
+
+
+@pytest.mark.anyio
+async def test_every_output_records_how_much_context_was_cut() -> None:
+    outputs = await RecordingProvider()._generate_single_impl(_completion(), SamplingParams())
+
+    assert [o.metadata[CONTEXT_CUT_TOKENS_KEY] for o in outputs] == [4, 4]

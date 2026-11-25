@@ -1,6 +1,8 @@
 """Beaker launcher for olmo-eval jobs."""
 
 from olmo_eval.launch.beaker.launcher import (
+    DEFAULT_WEKA_BUCKETS,
+    PROTECTED_MIN_RUNTIME,
     BeakerEnvSecret,
     BeakerJobConfig,
     BeakerLauncher,
@@ -15,12 +17,15 @@ from olmo_eval.launch.beaker.launcher import (
     resolve_clusters,
     validate_min_runtime,
     validate_priority_configuration,
+    weka_buckets_with,
 )
 
 __all__ = [
+    "DEFAULT_WEKA_BUCKETS",
     "BeakerEnvSecret",
     "BeakerJobConfig",
     "BeakerLauncher",
+    "PROTECTED_MIN_RUNTIME",
     "BeakerWekaBucket",
     "_parse_timeout",
     "build_install_command",
@@ -32,4 +37,5 @@ __all__ = [
     "resolve_clusters",
     "validate_min_runtime",
     "validate_priority_configuration",
+    "weka_buckets_with",
 ]

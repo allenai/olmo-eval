@@ -6,8 +6,8 @@ import { AppLink, buildHref } from "@/components/AppLink";
 import { DeltaValue, MetricName, ScoreValue, SigLegend } from "@/components/cells";
 import { type Column, DataTable, parseSortList, sortRows } from "@/components/DataTable";
 import { Badge, Checkbox, EmptyState, ErrorPanel, IconButton, Kbd, Panel, SearchInput, Segmented, Select, Tip, uiStyles as ui } from "@/components/primitives";
-import { formatCount, formatDuration, formatP, formatRate, formatRuntime, formatScore, metricLabel, shortHash } from "@/lib/format";
-import { BASIS_HELP, BASIS_LABEL, basisMark, parseRuntimeMode, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue, shares } from "@/lib/runtime";
+import { formatCount, formatDuration, formatGenerationCounts, formatP, formatRate, formatRuntime, formatScore, metricLabel, shortHash } from "@/lib/format";
+import { BASIS_HELP, BASIS_LABEL, basisMark, parseRuntimeMode, RUNTIME_MODE_HELP, RUNTIME_MODE_OPTIONS, runtimeModeParam, runtimeValue, SCORING_KIND_HELP, SCORING_KINDS, SCORING_KIND_LABEL, scoringValue, shares } from "@/lib/runtime";
 import { useHotkeys } from "@/lib/keyboard";
 import { parseList } from "@/lib/url";
 import s from "./run.module.css";
@@ -36,7 +36,7 @@ export function TasksTab(ctx: RunCtx) {
         if (query && !query.split(/[\s:]+/).filter(Boolean).every((tok) => t.task_name.toLowerCase().includes(tok))) return false;
         if (suiteFilter && !t.suites.includes(suiteFilter)) return false;
         if (flags.includes("changed") && !t.baseline?.delta.significant) return false;
-        if (flags.includes("failed") && !t.error && !t.instances_failed) return false;
+        if (flags.includes("failed") && !t.error && !t.instances_failed && !t.scoring_failures?.instances_unscored) return false;
         if (flags.includes("config") && !t.baseline?.delta.hash_mismatch) return false;
         return true;
       }),
@@ -98,18 +98,18 @@ export function TasksTab(ctx: RunCtx) {
         id: "score",
         header: "Score",
         title: "Score",
-        width: 110,
+        width: items.some((r) => formatGenerationCounts(r.generation_counts)) ? 190 : 104,
         align: "right",
         sortValue: (r) => r.score,
-        cell: (r) => <ScoreValue score={r.score} stderr={r.stderr} format={scoreFormat(r)} />,
+        cell: (r) => <ScoreValue score={r.score} stderr={r.stderr} format={scoreFormat(r)} generationCounts={r.generation_counts} />,
         csv: (r) => r.score,
       },
       {
         id: "n",
         header: "n",
-        title: "Instances (saved / processed / failed)",
-        headerTitle: "Instances saved / processed / failed",
-        width: 118,
+        title: "Instances (saved / processed / failed / unscored)",
+        headerTitle: "Instances saved / processed / failed (no output) / unscored",
+        width: 150,
         align: "right",
         sortValue: (r) => r.n,
         cell: (r) => (
@@ -117,6 +117,11 @@ export function TasksTab(ctx: RunCtx) {
             {formatCount(r.instances_stored)}
             <span className="muted">/{formatCount(r.instances_processed)}</span>
             {r.instances_failed ? <span style={{ color: "var(--danger-fg)" }}>/{formatCount(r.instances_failed)}</span> : null}
+            {r.scoring_failures?.instances_unscored ? (
+              <span style={{ color: "var(--warn-fg)" }} title="Instances with no scored output, left out of the score">
+                {" "}+{formatCount(r.scoring_failures.instances_unscored)} unscored
+              </span>
+            ) : null}
           </span>
         ),
         csv: (r) => r.n,
@@ -125,10 +130,10 @@ export function TasksTab(ctx: RunCtx) {
         id: "base",
         header: "Base",
         title: "Baseline score",
-        width: 80,
+        width: items.some((r) => formatGenerationCounts(r.baseline?.generation_counts)) ? 190 : 86,
         align: "right",
         sortValue: (r) => r.baseline?.score,
-        cell: (r) => (r.baseline ? <ScoreValue score={r.baseline.score} format={scoreFormat(r)} showStderr={false} muted /> : <span className="faint">—</span>),
+        cell: (r) => (r.baseline ? <ScoreValue score={r.baseline.score} format={scoreFormat(r)} showStderr={false} muted generationCounts={r.baseline.generation_counts} /> : <span className="faint">—</span>),
         csv: (r) => r.baseline?.score,
       },
       {
@@ -224,6 +229,25 @@ export function TasksTab(ctx: RunCtx) {
         ),
         csv: (r) => r.runtime.basis,
       },
+      // A scoring column appears only when some task spent time on it: older runs and external
+      // runners recorded none, and most tasks use no judge or sandbox.
+      ...SCORING_KINDS.filter((kind) => items.some((r) => (scoringValue(r.runtime, kind) ?? 0) > 0)).map((kind): Column<TaskResultRow> => ({
+        id: `scoring_${kind}`,
+        header: (
+          <Tip content={<span style={{ display: "block", maxWidth: 260 }}>{SCORING_KIND_HELP[kind]}</span>}>
+            <span>{SCORING_KIND_LABEL[kind]}</span>
+          </Tip>
+        ),
+        title: SCORING_KIND_LABEL[kind],
+        width: 100,
+        align: "right",
+        sortValue: (r) => scoringValue(r.runtime, kind),
+        cell: (r) => {
+          const v = scoringValue(r.runtime, kind);
+          return <span className="mono">{v == null ? <span className="faint">—</span> : formatRuntime(v)}</span>;
+        },
+        csv: (r) => scoringValue(r.runtime, kind),
+      })),
       {
         id: "duration",
         header: (
@@ -261,9 +285,10 @@ export function TasksTab(ctx: RunCtx) {
       },
       {
         id: "trunc",
-        header: "Trunc.",
-        title: "Truncation rate",
-        width: 70,
+        header: "Trunc. inst.",
+        title: "Instances with a truncated sample",
+        headerTitle: "Stored instances with at least one length-stopped sample / all stored instances. Cap counts beside Score use outputs, including every sample. Unavailable without stored predictions.",
+        width: 100,
         align: "right",
         sortValue: (r) => r.truncation_rate,
         cell: (r) => (
@@ -293,7 +318,7 @@ export function TasksTab(ctx: RunCtx) {
       }
     }
     return cols;
-  }, [allMetrics, metricKeys, mode, shareById, maxShare]);
+  }, [allMetrics, metricKeys, mode, shareById, maxShare, items]);
 
   // [ and ] step through the rows in the order the table shows them.
   const sortedRows = useMemo(() => sortRows(rows, parseSortList(search.ts), columns), [rows, search.ts, columns]);
@@ -325,6 +350,7 @@ export function TasksTab(ctx: RunCtx) {
       <Panel pad="none" refetching={ctx.tasks.isFetching && !ctx.tasks.isLoading}>
         <DataTable
           tableId="run-tasks"
+          rowHeight={rows.some((row) => row.generation_counts || row.baseline?.generation_counts) ? 72 : undefined}
           columns={columns}
           rows={rows}
           getRowId={(r) => String(r.task_result_id)}

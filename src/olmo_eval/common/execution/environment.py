@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -66,6 +67,21 @@ class ScoringContext:
     scoring_concurrency: int = 8
     inference_pool: ProviderLookup | None = None
     process_pool_manager: ProcessPoolManager | None = None
+    _judge_limiter: asyncio.Semaphore | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def judge_limiter(self) -> asyncio.Semaphore:
+        """Bound on the model-judge API calls in flight across every task in the run.
+
+        The context lives exactly as long as the run, so one limiter here is shared by
+        every judged task and judge scorer. Judges served from the inference pool are
+        bounded by their providers instead.
+        """
+        if self._judge_limiter is None:
+            self._judge_limiter = asyncio.Semaphore(max(1, self.scoring_concurrency))
+        return self._judge_limiter
 
     @property
     def has_execution_env(self) -> bool:

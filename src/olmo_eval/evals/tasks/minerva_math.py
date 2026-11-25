@@ -1,5 +1,6 @@
+import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from olmo_eval.common.formatters import CompletionFormatter, PPLFormatter
@@ -45,6 +46,15 @@ MATH_SUBSETS = [
     "prealgebra",
     "precalculus",
 ]
+
+#: Overrides for the ``final_answer`` variant: score a thinking model's answer only from the
+#: text after its last ``</think>``. A response without ``</think>`` (a trace that ran to the
+#: token cap, or no trace at all) is scored as no answer, so use it only for thinking models.
+FINAL_ANSWER_OVERRIDES: dict[str, Any] = {
+    "strip_thinking": True,
+    "strip_unclosed_thinking": True,
+    "thinking_prefilled": True,
+}
 
 
 class MinervaMathTask(Task):
@@ -186,6 +196,41 @@ class Math500(Math500Task):
     data_source = DataSource(path="HuggingFaceH4/MATH-500")
 
 
+@register("math500:latex_delimiters")
+class Math500LatexDelimiters(Math500):
+    """MATH-500 with delimiter sizing removed before legacy unit normalization.
+
+    The reference normalizer removes ``ft`` inside ``\\left`` before its later
+    delimiter cleanup can recognize the command. Keep that reference behavior
+    under ``math500`` and correct both gold and generated answers in this spec.
+    """
+
+    data_source = DataSource(
+        path="HuggingFaceH4/MATH-500", revision="6e4ed1a2a79af7d8630a6b768ec859cb5af4d3be"
+    )
+
+    @staticmethod
+    def _answers(text: str) -> list[str]:
+        # Match whole commands, not prefixes of commands such as \leftarrow.
+        text = re.sub(r"\\(?:left|right)(?![A-Za-z])", "", text)
+        return MathExtractor.extract_answer(text)
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        instance = super().process_doc(doc, index)
+        assert instance is not None
+        answers = self._answers(doc["solution"])
+        return replace(
+            instance,
+            gold_answer=answers[0] if answers else None,
+            metadata={**instance.metadata, "all_gold_answers": answers},
+        )
+
+    def extract_answer(self, output: LMOutput) -> str | None:
+        answers = self._answers(output.text)
+        output.metadata["all_extracted_answers"] = answers
+        return answers[0] if answers else None
+
+
 for _subset in MATH_SUBSETS:
     _task_name = f"minerva_math_{_subset}"
 
@@ -254,6 +299,37 @@ for _subset in MATH_SUBSETS:
         ),
     )
 
+    # olmo3base without the "\n\n" stop sequence, matching gsm8k:olmo3base_multiparagraph.
+    # The olmo3base variant above stops at the first blank line, which cuts off solutions
+    # that span several paragraphs. MathExtractor then falls back to the last \boxed{} or
+    # $...$ in the partial text, so a cut-off solution can be scored on an intermediate
+    # expression. This variant keeps every other olmo3base setting so that the two differ
+    # only in where generation stops.
+    register_variant(
+        _task_name,
+        "olmo3base_multiparagraph",
+        fewshot_source="minerva_math_fixed",
+        formatter=MinervaCompletionFormatter(
+            template="Problem:\n{question}\n\nSolution:",
+            answer_prefix=" ",
+            fewshot_answer_key="solution_text",
+        ),
+        metrics=(
+            AccuracyMetric(scorer=MinervaMathScorer),
+            PassAtKMetric(k=1, scorer=MinervaMathScorer),
+            PassAtKMetric(k=2, scorer=MinervaMathScorer),
+            PassAtKMetric(k=4, scorer=MinervaMathScorer),
+        ),
+        primary_metric=PassAtKMetric(k=1, scorer=MinervaMathScorer),
+        sampling_params=SamplingParams(
+            max_tokens=1024,
+            temperature=0.6,
+            top_p=0.6,
+            stop_sequences=("Problem:",),
+            num_samples=4,
+        ),
+    )
+
     register_variant(
         _task_name,
         "olmo3base_gen",
@@ -298,6 +374,10 @@ for _subset in MATH_SUBSETS:
         "olmes",
         fewshot_source="minerva_math_fixed",
     )
+
+    register_variant(_task_name, "final_answer", **FINAL_ANSWER_OVERRIDES)
+
+register_variant("math500", "final_answer", **FINAL_ANSWER_OVERRIDES)
 
 register_variant(
     "math500",

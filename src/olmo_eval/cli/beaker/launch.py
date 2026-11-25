@@ -34,6 +34,19 @@ from olmo_eval.cli.utils import (
 from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_UV_CACHE_DIR
 
 
+def _validate_weka_buckets(
+    _ctx: click.Context, _param: click.Parameter, buckets: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Reject anything that is not a bare bucket name, such as a /weka/... path."""
+    for bucket in buckets:
+        if not bucket or "/" in bucket or ":" in bucket:
+            raise click.BadParameter(
+                f"{bucket!r} is not a bucket name; pass the bucket name, "
+                "e.g. --weka-bucket olmo-3p5-post-checkpoints"
+            )
+    return buckets
+
+
 @click.command()
 @click.option(
     "--config",
@@ -85,7 +98,10 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
 @click.option(
     "--preemptible/--no-preemptible",
     default=None,
-    help="Allow preemption (deprecated by Beaker; prefer --min-runtime)",
+    help=(
+        "Allow preemption (deprecated by Beaker; prefer --min-runtime). "
+        "--no-preemptible is the same as --min-runtime 8h and keeps auto-resume on."
+    ),
 )
 @click.option(
     "--min-runtime",
@@ -97,6 +113,28 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
 )
 @click.option("--timeout", "-T", default=None, help="Job timeout (e.g., 24h, 30m)")
 @click.option("--retries", "-r", type=int, help="Number of retries on failure")
+@click.option(
+    "--resume/--no-resume",
+    default=None,
+    help=(
+        "Recover interrupted task progress (default: enabled). "
+        "--no-resume needs no resume volume; interrupted attempts start over."
+    ),
+)
+@click.option(
+    "--resume-volume",
+    default=None,
+    help=(
+        "Native Beaker volume for resumable task state (<org>/<name> or v_...). "
+        "Default: ai2/olmo-eval. Requires a read-write claim."
+    ),
+)
+@click.option(
+    "--resume-retention-days",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Days to retain inactive recovery files in tmp-<days>d (default: 7).",
+)
 @click.option("--workspace", "-w", help="Beaker workspace")
 @click.option("--budget", "-B", help="Beaker budget")
 @click.option("--image", "-I", help="Beaker image (e.g., ai2-tylerm/olmo-eval-cu1261-trc280-amd64)")
@@ -231,6 +269,13 @@ from olmo_eval.common.constants.infrastructure import BEAKER_RESULT_DIR, BEAKER_
     help="UV cache directory for package downloads (on Weka shared storage)",
 )
 @click.option(
+    "--weka-bucket",
+    "weka_buckets",
+    multiple=True,
+    callback=_validate_weka_buckets,
+    help="Extra Weka bucket to mount at /weka/<bucket>, on top of the defaults (repeatable)",
+)
+@click.option(
     "--hf-token/--no-hf-token",
     "hf_token",
     default=None,
@@ -277,6 +322,9 @@ def launch(
     min_runtime: str | None,
     timeout: str | None,
     retries: int | None,
+    resume: bool | None,
+    resume_volume: str | None,
+    resume_retention_days: int | None,
     workspace: str | None,
     budget: str | None,
     image: str | None,
@@ -305,6 +353,7 @@ def launch(
     eval_args: tuple[str, ...],
     provider_kwargs: tuple[str, ...],
     uv_cache_dir: str,
+    weka_buckets: tuple[str, ...],
     hf_token: bool | None,
     secret_env: tuple[str, ...],
     env_vars: tuple[str, ...],
@@ -331,10 +380,6 @@ def launch(
     from olmo_eval.cli.beaker.experiment_builder import ExperimentPlanBuilder
     from olmo_eval.cli.beaker.job_assembler import JobConfigAssembler
     from olmo_eval.cli.beaker.task_validator import TaskValidator
-    from olmo_eval.common.constants.infrastructure import (
-        BEAKER_DEFAULT_IMAGE,
-        BEAKER_SANDBOX_IMAGE,
-    )
 
     ordered_args = reconstruct_ordered_args(sys.argv[1:])
     raw_task_overrides, harness_overrides = process_ordered_args(ordered_args)
@@ -408,6 +453,9 @@ def launch(
         "min_runtime": min_runtime,
         "timeout": timeout,
         "retries": retries,
+        "resume": resume,
+        "resume_volume": resume_volume,
+        "resume_retention_days": resume_retention_days,
         "workspace": workspace,
         "budget": budget,
         "image": image,
@@ -429,12 +477,15 @@ def launch(
         "harness": harness,
         "harness_overrides": harness_overrides,
         "uv_cache_dir": uv_cache_dir,
+        "weka_buckets": list(weka_buckets),
         "secret_env_overrides": secret_env_overrides,
         "env_vars": parsed_env_vars,
     }
 
     # Handle external evaluations mode
     if external_evals:
+        if resume is not None or resume_volume is not None or resume_retention_days is not None:
+            raise click.UsageError("Resume volume options currently support task evaluations only")
         if task:
             console.print(
                 "[red]Error:[/red] Cannot mix --external-eval (-E) with --task (-t). "
@@ -481,6 +532,7 @@ def launch(
             eval_args=parsed_eval_args if parsed_eval_args else None,
             provider_kwargs=parsed_provider_kwargs if parsed_provider_kwargs else None,
             uv_cache_dir=uv_cache_dir,
+            weka_buckets=list(weka_buckets),
             preemptible=preemptible,
             min_runtime=min_runtime,
             retries=retries,
@@ -520,7 +572,7 @@ def launch(
         gcs_credentials,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
-    _require_upload_credentials(launch_config.upload, dry_run)
+    _require_upload_credentials(launch_config.upload, dry_run, launch_config.workspace)
 
     if dry_run:
         console.print("[yellow]Dry run mode - not submitting[/yellow]")
@@ -546,14 +598,14 @@ def launch(
             )
         harness_needs_sandbox = bool(harness_preset.sandboxes)
 
+    effective_image: str | None
     if image:
         effective_image = image
     elif eval_config and eval_config.beaker_image:
         effective_image = eval_config.beaker_image
-    elif harness_needs_sandbox:
-        effective_image = BEAKER_SANDBOX_IMAGE
     else:
-        effective_image = BEAKER_DEFAULT_IMAGE
+        # JobConfigAssembler selects per resolved provider and sandbox need.
+        effective_image = None
 
     # Handle group creation
     _handle_group_creation(launcher, effective_groups, dry_run, yes)
@@ -731,54 +783,58 @@ def _get_task_configs(
     Returns:
         Dict mapping task_spec -> TaskConfig (with overrides applied).
     """
-    from copy import deepcopy
+    from dataclasses import fields
 
     from olmo_eval.cli.run.config import _apply_dotlist_overrides
-    from olmo_eval.evals.tasks.common import get_task as get_task_instance
-    from olmo_eval.evals.tasks.common import parse_task_spec
+    from olmo_eval.common.types import SamplingParams
+    from olmo_eval.evals.tasks.common import TaskConfig
+    from olmo_eval.runners.asynq.preparation import configure_task
 
     task_overrides = task_overrides or {}
     task_configs = {}
+    task_fields = {f.name for f in fields(TaskConfig)}
+    sampling_fields = {f.name for f in fields(SamplingParams)}
 
     for task_spec in valid_tasks:
-        task_name, variants, _overrides = parse_task_spec(task_spec)
+        parsed = _apply_dotlist_overrides({}, task_overrides.get(task_spec, []))
+        overrides = {key: value for key, value in parsed.items() if key in task_fields}
+        sampling = {key: value for key, value in parsed.items() if key in sampling_fields}
         try:
-            task_instance = get_task_instance(task_spec)
+            task_configs[task_spec] = configure_task(task_spec, overrides, sampling).config
         except ValueError as e:
             console.print(f"[red]Error loading task '{task_spec}':[/red] {e}")
             raise SystemExit(1) from None
 
-        # Deep copy the config so we can apply overrides directly
-        task_cfg = deepcopy(task_instance.config)
-
-        # Apply CLI overrides using dotlist format (supports nested keys and JSON)
-        cli_overrides = task_overrides.get(task_spec, [])
-        if cli_overrides:
-            # Convert config to dict, apply overrides, convert back
-            task_dict = task_cfg.to_dict() if hasattr(task_cfg, "to_dict") else vars(task_cfg)
-            task_dict = _apply_dotlist_overrides(task_dict, cli_overrides)
-            # Update config attributes from dict
-            for key, value in task_dict.items():
-                if hasattr(task_cfg, key):
-                    setattr(task_cfg, key, value)
-
-        task_configs[task_spec] = task_cfg
-
     return task_configs
 
 
-def _require_upload_credentials(upload: bool, dry_run: bool) -> None:
-    """Stop before launching when uploads are on but no local Google credentials exist.
+def _require_upload_credentials(upload: bool, dry_run: bool, workspace: str) -> None:
+    """Stop before launching when uploads are on but no key source exists.
 
     The launch reads the uploader key from Secret Manager with the local credentials, so
-    they never leave this machine.
+    they never leave this machine. Without them, it reuses the workspace's existing
+    uploader secret when there is one.
     """
+    from google.auth.exceptions import GoogleAuthError
+
+    from olmo_eval.launch.beaker.uploader import UPLOADER_SECRET_NAME, uploader_secret_exists
     from olmo_eval.upload.auth import NO_CREDENTIALS_MESSAGE, has_local_google_credentials
 
-    if not upload or has_local_google_credentials():
+    if not upload:
         return
+    try:
+        if has_local_google_credentials():
+            return
+    except GoogleAuthError:  # e.g. RefreshError while resolving the project of expired ADC
+        pass
     if dry_run:
         console.print(f"[yellow]Warning:[/yellow] {NO_CREDENTIALS_MESSAGE}")
+        return
+    if uploader_secret_exists(workspace):
+        console.print(
+            "[yellow]Note:[/yellow] No local Google credentials; jobs upload with the "
+            f"existing {UPLOADER_SECRET_NAME} secret in {workspace}."
+        )
         return
     console.print(f"[red]Error:[/red] {NO_CREDENTIALS_MESSAGE}")
     raise SystemExit(1)
@@ -1036,10 +1092,15 @@ def _launch_jobs(
     Returns:
         List of launched experiment IDs.
     """
+    from olmo_eval.launch.beaker.volume import VolumeClaimError
+
     launched_experiments: list[str] = []
     for job_config in job_configs:
         if not dry_run:
-            experiment = launcher.launch(job_config)
+            try:
+                experiment = launcher.launch(job_config)
+            except VolumeClaimError as e:
+                raise click.ClickException(str(e)) from None
             if experiment:
                 console.print(f"[green]Launched:[/green] {launcher.experiment_url(experiment)}")
                 launched_experiments.append(experiment.id)
@@ -1071,6 +1132,7 @@ def _launch_external_evals(
     eval_args: dict[str, str] | None = None,
     provider_kwargs: dict[str, str] | None = None,
     uv_cache_dir: str | None = None,
+    weka_buckets: list[str] | None = None,
     preemptible: bool | None = None,
     min_runtime: str | None = None,
     retries: int | None = None,
@@ -1142,7 +1204,7 @@ def _launch_external_evals(
         gcs_credentials=gcs_credentials,
     )
     inject_aws, inject_gcs = cred_manager.detect_and_setup(launcher)
-    _require_upload_credentials(upload, dry_run)
+    _require_upload_credentials(upload, dry_run, effective_workspace)
 
     # Auto-generate group if needed (using shared helper)
     effective_groups = _auto_generate_group("external-eval", list(group))
@@ -1262,6 +1324,7 @@ def _launch_external_evals(
             base_url=provider_config.base_url,
             user_env_vars=user_env_vars,
             force_download_model=force_download_model,
+            weka_buckets=weka_buckets,
         )
         job_configs.append(job_config)
 

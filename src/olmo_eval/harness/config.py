@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import copy
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any, Literal
 
+from olmo_eval.common.openai_credentials import secret_available
 from olmo_eval.common.repr import hide_unset
 from olmo_eval.inference.providers.config import ProviderConfig
 
@@ -52,10 +52,10 @@ class HarnessConfig:
     metrics: MetricsConfig | None = None
     batching: BatchConfig | None = None
     scorer_startup_timeout: float | None = None
-    # Fraction of a task's instances allowed to hard-fail before the task is marked
-    # failed and the run exits non-zero. None means the runner default (0.05). Set to
-    # 1.0 to never fail a run on partial instance failures; a task that saves zero
-    # instances still fails, since it produced no metrics.
+    # The failure budget: fraction of a task's instances allowed to have no output or no
+    # scored output before the task is marked failed and the run exits non-zero. None
+    # means the runner default (0.05). Set to 1.0 to never fail a run on partial
+    # failures; a task with nothing scored still fails, since it produced no metrics.
     max_hard_failure_rate: float | None = None
 
     # Cache for resolved tools
@@ -117,11 +117,7 @@ class HarnessConfig:
         Returns:
             List of missing secret names (empty if all present).
         """
-        missing = []
-        for secret in self.required_secrets:
-            if not os.getenv(secret):
-                missing.append(secret)
-        return missing
+        return [secret for secret in self.required_secrets if not secret_available(secret)]
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization.
@@ -343,10 +339,10 @@ def harness_config(
         batching: Batching strategy configuration (None = sequential).
         scorer_startup_timeout: Timeout for scorer worker startup. If None, derived from
             sandbox configs (max startup_timeout + 60s buffer) or defaults to 60s.
-        max_hard_failure_rate: Fraction of a task's instances allowed to hard-fail
-            before the task is marked failed. If None, defaults to 0.05. Set to 1.0 to
-            never fail a run on partial instance failures; a task that saves zero
-            instances still fails.
+        max_hard_failure_rate: The failure budget: fraction of a task's instances
+            allowed to have no output or no scored output before the task is marked
+            failed. If None, defaults to 0.05. Set to 1.0 to never fail a run on partial
+            failures; a task with nothing scored still fails.
 
     Returns:
         A new HarnessConfig instance.

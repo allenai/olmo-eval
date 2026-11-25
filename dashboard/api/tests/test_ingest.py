@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import copy
 import hashlib
+import json
 import math
 from typing import Any
 
@@ -14,7 +15,9 @@ import pytest
 from jsonschema import Draft7Validator
 from sqlalchemy import text
 
+from olmo_eval_api.schemas import ingest as s
 from olmo_eval_api.services.derive import instance_key_hash
+from olmo_eval_api.services.ingest import HASH_OPTIONAL_FIELDS
 from olmo_eval_api.settings import UPLOADER_SERVICE_ACCOUNT
 from tests.factories import (
     instance_rows,
@@ -61,6 +64,85 @@ async def test_health(client: httpx.AsyncClient) -> None:
     body = response.json()
     assert body["status"] == "ok" and body["mode"] == "all" and body["db"] == "ok"
     assert response.headers["x-request-id"]
+
+
+async def test_generation_counts_survive_task_result_upserts(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    for counts in ({"generations": 3, "cap_hit": 1}, {"generations": 3, "cap_hit": 2}):
+        payload["generation_counts"] = counts
+        response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+        assert response.status_code == 200, response.text
+        stored = await session.execute(
+            text("SELECT generation_counts FROM task_results WHERE id = :id"),
+            {"id": response.json()["task_result_id"]},
+        )
+        assert stored.scalar_one() == counts
+
+
+async def test_scoring_failures_are_stored_with_the_task_result(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    payload["scoring_failures"] = {
+        "instances_unscored": 1,
+        "instances_partially_scored": 2,
+        "outputs_unscored": 3,
+        "infrastructure": 2,
+        "by_type": {"JudgeParseError": 2, "KeyError": 1},
+        "first_error": "JudgeParseError: no parseable verdict after 3 judge attempts",
+    }
+    response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+    assert response.status_code == 200, response.text
+    stored = await session.execute(
+        text("SELECT scoring_failures FROM task_results WHERE id = :id"),
+        {"id": response.json()["task_result_id"]},
+    )
+    assert stored.scalar_one() == payload["scoring_failures"]
+
+
+async def _stored_scoring_seconds(session: Any, task_result_id: int) -> tuple[Any, ...]:
+    """The judge, sandbox and compute seconds stored for a task result."""
+    stored = await session.execute(
+        text(
+            "SELECT scoring_judge_seconds, scoring_sandbox_seconds, scoring_compute_seconds"
+            " FROM task_results WHERE id = :id"
+        ),
+        {"id": task_result_id},
+    )
+    return tuple(stored.one())
+
+
+async def test_scoring_seconds_are_stored_and_updated_on_reupload(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    for judge in (62.0, 70.5):
+        payload.update(
+            scoring_judge_seconds=judge, scoring_sandbox_seconds=0.0, scoring_compute_seconds=3.4
+        )
+        response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+        assert response.status_code == 200, response.text
+        stored = await _stored_scoring_seconds(session, response.json()["task_result_id"])
+        assert stored == (judge, 0.0, 3.4)
+
+
+async def test_negative_scoring_seconds_are_stored_as_null(
+    client: httpx.AsyncClient, session: Any
+) -> None:
+    await seed_contract_example_run(client)
+    payload = load_example("ingest/task-result.request.json")
+    payload.update(
+        scoring_judge_seconds=-1.0, scoring_sandbox_seconds=0.0, scoring_compute_seconds=2.0
+    )
+    response = await client.post(f"/v1/runs/{RUN_ID}/task-results", json=payload)
+    assert response.status_code == 200, response.text
+    stored = await _stored_scoring_seconds(session, response.json()["task_result_id"])
+    assert stored == (None, 0.0, 2.0)
 
 
 async def test_request_id_passthrough(client: httpx.AsyncClient) -> None:
@@ -195,6 +277,7 @@ async def test_contract_example_round_trip(client: httpx.AsyncClient, session: A
     assert row["reported_completion_tokens_total"] == 398112
     assert row["first_request_at"] is not None and row["last_completed_at"] is not None
     assert row["attributed_inference_seconds"] is None
+    assert row["scoring_judge_seconds"] is None and row["scoring_compute_seconds"] is None
     assert row["finalized_at"] is not None
     assert run["startup_seconds"] == 78.4
     assert run["processing_seconds"] == 1266.1
@@ -214,6 +297,9 @@ async def test_old_client_payloads_ingest(client: httpx.AsyncClient, session: An
         "prompt_tokens_total",
         "completion_tokens_total",
         "attributed_inference_seconds",
+        "scoring_judge_seconds",
+        "scoring_sandbox_seconds",
+        "scoring_compute_seconds",
     ):
         del task[key]
     tr = (await client.post(f"/v1/runs/{RUN_ID}/task-results", json=task)).json()
@@ -302,6 +388,70 @@ async def test_status_never_downgraded(client: httpx.AsyncClient) -> None:
     assert body["upload_state"] == "complete"
 
 
+async def _upsert_status(client: httpx.AsyncClient, body: dict, status: str) -> dict:
+    body["run"]["status"] = status
+    response = await client.put(f"/v1/runs/{body['run']['run_id']}", json=body)
+    assert response.status_code == 200, response.text
+    assert_valid("RunUpsertResponse", response.json())
+    return response.json()
+
+
+async def _complete(client: httpx.AsyncClient, run_id: str, status: str) -> None:
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": status,
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
+async def test_an_interrupted_run_resumes_and_then_finishes(client: httpx.AsyncClient) -> None:
+    body = run_payload(run_id="intr00000001", model_name="m", status="running")
+    assert (await _upsert_status(client, body, "running"))["status"] == "running"
+
+    stopped = await _upsert_status(client, body, "interrupted")
+    assert stopped["status"] == "interrupted" and stopped["upload_state"] == "uploading"
+
+    # The replacement job registers its start under the same run ID.
+    assert (await _upsert_status(client, body, "running"))["status"] == "running"
+    assert (await _upsert_status(client, body, "interrupted"))["status"] == "interrupted"
+
+    await _complete(client, "intr00000001", "partial")
+    final = await _upsert_status(client, body, "partial")
+    assert final["status"] == "partial" and final["upload_state"] == "complete"
+
+
+@pytest.mark.parametrize("final", ["complete", "partial", "failed"])
+@pytest.mark.parametrize("unfinished", ["running", "interrupted"])
+async def test_a_final_status_is_never_downgraded(
+    client: httpx.AsyncClient, final: str, unfinished: str
+) -> None:
+    run_id = "fini00000001"
+    body = run_payload(run_id=run_id, model_name="m", status="running")
+    await _upsert_status(client, body, "interrupted")
+    await _complete(client, run_id, final)
+
+    after = await _upsert_status(client, body, unfinished)
+
+    assert after["status"] == final and after["upload_state"] == "complete"
+
+
+async def test_an_interrupted_run_can_be_reported_failed(client: httpx.AsyncClient) -> None:
+    run_id = "intr00000002"
+    body = run_payload(run_id=run_id, model_name="m", status="running")
+    await _upsert_status(client, body, "interrupted")
+
+    assert (await _upsert_status(client, body, "failed"))["status"] == "failed"
+    await _complete(client, run_id, "failed")
+    assert (await _upsert_status(client, body, "interrupted"))["status"] == "failed"
+
+
 async def test_reupload_keeps_a_complete_run_visible(client: httpx.AsyncClient) -> None:
     await seed_contract_example_run(client)
     final = load_example("ingest/run-upsert-final.request.json")
@@ -310,8 +460,9 @@ async def test_reupload_keeps_a_complete_run_visible(client: httpx.AsyncClient) 
     assert body["status"] == "partial" and body["upload_state"] == "complete"
 
 
+@pytest.mark.parametrize("legacy_hash", [False, True])
 async def test_identical_task_result_reupload_keeps_instances(
-    client: httpx.AsyncClient, session: Any
+    client: httpx.AsyncClient, session: Any, legacy_hash: bool
 ) -> None:
     run_id = "same00000001"
     await seed_run(client, run_id=run_id, tasks={"gsm8k": [1.0, 0.0, 1.0]})
@@ -324,6 +475,21 @@ async def test_identical_task_result_reupload_keeps_instances(
         corpus_score=2 / 3,
         n=3,
     )
+    if legacy_hash:
+        request = s.TaskResultIn.model_validate(payload)
+        legacy_body = {
+            "request": request.model_dump(mode="json", exclude=set(HASH_OPTIONAL_FIELDS)),
+            "files": {
+                path: None for path in (request.predictions_path, request.requests_path) if path
+            },
+        }
+        digest = hashlib.sha256(json.dumps(legacy_body, sort_keys=True).encode()).hexdigest()
+        await session.execute(
+            text("UPDATE task_results SET content_hash = :h WHERE run_id = :r"),
+            {"h": digest, "r": run_id},
+        )
+        await session.commit()
+
     # An interrupted re-upload: the run and the task result are sent again, nothing else.
     body = run_payload(run_id=run_id, model_name="test-org/test-model", task_specs=["gsm8k"])
     assert (await client.put(f"/v1/runs/{run_id}", json=body)).json()["upload_state"] == "complete"
@@ -665,19 +831,25 @@ async def test_complete_derivations(client: httpx.AsyncClient, session: Any) -> 
     assert run["num_tasks"] == 3 and run["num_instances"] == 120
 
 
-async def test_suite_with_missing_task_and_mean_headline(
-    client: httpx.AsyncClient, session: Any
+@pytest.mark.parametrize("unscored_suite", [False, True])
+async def test_headline_respects_unscored_suite_scopes(
+    client: httpx.AsyncClient, session: Any, unscored_suite: bool
 ) -> None:
     await seed_run(
         client,
         run_id="run000000002",
         tasks={"t1": [1.0, 0.0] * 10, "t2": [1.0] * 20},
-        suites=[suite("s", ["t1", "t3"], score=None, aggregation="display_only")],
+        suites=[suite("s", ["t1", "t3"], score=None, aggregation="display_only")]
+        if unscored_suite
+        else [],
     )
-    sr = (await session.execute(text("SELECT * FROM suite_results"))).mappings().one()
-    assert sr["tasks_missing"] == ["t3"]
     run = (await session.execute(text("SELECT headline FROM runs"))).scalar_one()
-    assert run["kind"] == "mean" and math.isclose(run["score"], 0.75)
+    if unscored_suite:
+        sr = (await session.execute(text("SELECT * FROM suite_results"))).mappings().one()
+        assert sr["tasks_missing"] == ["t3"]
+        assert run is None
+    else:
+        assert run["kind"] == "mean" and math.isclose(run["score"], 0.75)
 
 
 async def test_nested_average_suite_weighs_every_task_equally(
@@ -832,3 +1004,192 @@ async def test_ingest_mode_rejects_dashboard_routes(engine: Any, settings: Any) 
             assert (await c.get("/api/me")).status_code == 404
             assert (await c.get("/health")).json()["mode"] == "ingest"
             assert (await c.get("/v1/whoami")).status_code == 401
+
+
+@pytest.mark.parametrize("reported_score", [0.4, 0.6, -0.2, None])
+async def test_gap_ingest_metadata_follows_companion(
+    client: httpx.AsyncClient, session: Any, reported_score: float | None
+) -> None:
+    run_id = "metastore01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="test-org/metadata-model")
+    )
+    assert response.status_code == 200, response.text
+    for name, score, fmt, direction in (("in", 0.6, "raw", None), ("out", 0.4, "percent", False)):
+        response = await client.post(
+            f"/v1/runs/{run_id}/task-results",
+            json=task_payload(
+                name,
+                task_hash=f"hash-{name}",
+                primary_metric="acc:default",
+                corpus_score=score,
+                n=1,
+                display_format=fmt,
+                higher_is_better=direction,
+            ),
+        )
+        assert response.status_code == 200, response.text
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [suite("metapair", ["in", "out"], score=reported_score, aggregation="gap")],
+            "expected_task_results": 2,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    row = (
+        await session.execute(
+            text(
+                "SELECT display_format, higher_is_better, score, primary_metric, metrics "
+                "FROM suite_results WHERE run_id = :run"
+            ),
+            {"run": run_id},
+        )
+    ).one()
+    assert row.display_format == "percent"
+    assert row.higher_is_better is False
+    assert row.score == 0.4 and row.primary_metric == "primary_score:companion"
+    assert row.metrics == pytest.approx(
+        {"primary_score:reference": 0.6, "primary_score:companion": 0.4, "primary_score:gap": -0.2}
+    )
+
+
+@pytest.mark.parametrize("invalid_pair", ["different_metrics", "unscored", "missing_task"])
+async def test_ingest_withholds_invalid_gap_scores(
+    client: httpx.AsyncClient, session: Any, invalid_pair: str
+) -> None:
+    run_id = "invalidgap01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="test-org/gap-validation")
+    )
+    assert response.status_code == 200, response.text
+    tasks = [
+        ("in", "strict:default", 0.6),
+        (
+            "out",
+            "flex:default" if invalid_pair == "different_metrics" else "strict:default",
+            None if invalid_pair == "unscored" else 0.4,
+        ),
+    ]
+    if invalid_pair == "missing_task":
+        tasks.pop()
+    for name, metric, score in tasks:
+        response = await client.post(
+            f"/v1/runs/{run_id}/task-results",
+            json=task_payload(
+                name, task_hash=f"hash-{name}", primary_metric=metric, corpus_score=score, n=1
+            ),
+        )
+        assert response.status_code == 200, response.text
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [suite("pair", ["in", "out"], score=0.9, aggregation="gap")],
+            "expected_task_results": len(tasks),
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    row = (
+        await session.execute(
+            text(
+                "SELECT score, stderr, primary_metric, metrics FROM suite_results "
+                "WHERE run_id = :run"
+            ),
+            {"run": run_id},
+        )
+    ).one()
+    assert row.score is None and row.stderr is None
+    assert row.primary_metric is None and row.metrics == {}
+    assert (
+        await session.execute(
+            text("SELECT headline FROM runs WHERE run_id = :run"), {"run": run_id}
+        )
+    ).scalar_one() is None
+
+
+async def test_ingest_rejects_nested_gap_definitions(client):
+    run_id = "nestedgap01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="nested-gap")
+    )
+    assert response.status_code == 200, response.text
+    pair = suite("pair", ["in", "out"], aggregation="gap")
+    parent = suite("parent", [], aggregation="average")
+    parent["children"] = [{"type": "suite", "name": "pair"}]
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [pair, parent],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == 400
+    assert "GAP suites cannot be nested" in response.text
+
+
+async def test_incomplete_gap_run_does_not_override_column_metadata(client, session):
+    from olmo_eval_api.routers.api.runs import column_meta
+
+    pair = suite("columnpair", ["in", "out"], aggregation="gap")
+    await seed_run(
+        client, run_id="metavalid01", tasks={"in": [0.0, 1.0], "out": [1.0, 1.0]}, suites=[pair]
+    )
+    await seed_run(client, run_id="metapartial01", tasks={"in": [0.0, 1.0]}, suites=[pair])
+    columns = await column_meta(session, [("suite:columnpair", "suite", "columnpair")])
+    assert columns[0].display_format == "percent"
+    assert columns[0].higher_is_better is True
+
+
+@pytest.mark.parametrize("aggregation", ["none", "display_only"])
+async def test_ingest_clears_legacy_no_score_suite_values(client, session, aggregation):
+    legacy = suite("legacy", ["a"], score=0.9, aggregation=aggregation)
+    legacy.update(
+        primary_metric="primary_score:average", metrics={"primary_score": {"average": 0.9}}
+    )
+    await seed_run(client, run_id="legacynone01", tasks={"a": [1.0]}, suites=[legacy])
+    row = (
+        await session.execute(
+            text(
+                "SELECT score,primary_metric,stderr FROM suite_results WHERE run_id='legacynone01'"
+            )
+        )
+    ).one()
+    assert row.score is None and row.primary_metric is None and row.stderr is None
+
+
+@pytest.mark.parametrize("aggregation", ["none", "average"])
+async def test_ingest_gap_requires_none_at_every_ancestor(client, aggregation):
+    run_id = "gapancestor01"
+    response = await client.put(
+        f"/v1/runs/{run_id}", json=run_payload(run_id=run_id, model_name="gap-ancestors")
+    )
+    assert response.status_code == 200, response.text
+    pair = suite("pair", ["in", "out"], aggregation="gap")
+    wrapper = suite("wrapper", [], aggregation="none")
+    wrapper["children"] = [{"type": "suite", "name": "pair"}]
+    parent = suite("parent", [], aggregation=aggregation)
+    parent["children"] = [{"type": "suite", "name": "wrapper"}]
+    response = await client.post(
+        f"/v1/runs/{run_id}/complete",
+        json={
+            "status": "complete",
+            "finished_at": None,
+            "duration_seconds": 1.0,
+            "suites": [pair, wrapper, parent],
+            "expected_task_results": 0,
+            "expected_artifacts": 0,
+        },
+    )
+    assert response.status_code == (200 if aggregation == "none" else 400), response.text

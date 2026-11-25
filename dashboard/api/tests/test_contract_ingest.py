@@ -57,6 +57,38 @@ def test_every_ingest_definition_is_exercised() -> None:
     assert set(MODELS) <= covered | {"WhoAmIResponse"}
 
 
+def test_generation_counts_are_optional_and_nonnegative() -> None:
+    payload = load_example("ingest/task-result.request.json")
+    assert s.TaskResultIn.model_validate(payload).generation_counts is None
+    payload["generation_counts"] = {"generations": 4, "cap_hit": 2, "unclosed_think": 1}
+    assert schema_errors("TaskResultIn", payload) == []
+    assert s.TaskResultIn.model_validate(payload).generation_counts == payload["generation_counts"]
+    payload["generation_counts"]["cap_hit"] = -1
+    assert schema_errors("TaskResultIn", payload)
+    with pytest.raises(ValidationError):
+        s.TaskResultIn.model_validate(payload)
+
+
+def test_scoring_failures_are_optional_and_nonnegative() -> None:
+    payload = load_example("ingest/task-result.request.json")
+    assert s.TaskResultIn.model_validate(payload).scoring_failures is None
+    payload["scoring_failures"] = {
+        "instances_unscored": 1,
+        "instances_partially_scored": 2,
+        "outputs_unscored": 3,
+        "infrastructure": 2,
+        "by_type": {"JudgeParseError": 2, "KeyError": 1},
+        "first_error": "JudgeParseError: no parseable verdict after 3 judge attempts",
+    }
+    assert schema_errors("TaskResultIn", payload) == []
+    parsed = s.TaskResultIn.model_validate(payload).scoring_failures
+    assert parsed is not None and parsed.model_dump() == payload["scoring_failures"]
+    payload["scoring_failures"]["instances_unscored"] = -1
+    assert schema_errors("TaskResultIn", payload)
+    with pytest.raises(ValidationError):
+        s.TaskResultIn.model_validate(payload)
+
+
 MALFORMED = [
     ("ingest/run-upsert-start.request.json", s.RunUpsertRequest, ["run", "run_id"], "BAD ID"),
     ("ingest/run-upsert-start.request.json", s.RunUpsertRequest, ["protocol_version"], 2),

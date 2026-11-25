@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from olmo_eval.common.constants.infrastructure import (
+    BEAKER_DEFAULT_IMAGE,
     BEAKER_RESULT_DIR,
+    BEAKER_SANDBOX_IMAGE,
+    BEAKER_SGLANG_IMAGE,
+    BEAKER_SGLANG_SANDBOX_IMAGE,
     cluster_has_weka,
 )
 from olmo_eval.launch.beaker.constants import BEAKER_INFRA_ENV_VARS
@@ -22,6 +27,16 @@ if TYPE_CHECKING:
 
 OLMO_CORE_PACKAGE_WITH_EXTRAS = "ai2-olmo-core[torchao,transformers]"
 _VERSION_SELECTOR_RE = re.compile(r"^(?:\d|==|!=|~=|>=|<=|>|<)")
+
+
+def default_beaker_image(provider_kind: str | None, sandbox: bool) -> str:
+    """Base image for a job that names none.
+
+    SGLang needs its CUDA 13 / PyTorch 2.13 base; sandboxed harnesses need Podman.
+    """
+    if provider_kind == "sglang":
+        return BEAKER_SGLANG_SANDBOX_IMAGE if sandbox else BEAKER_SGLANG_IMAGE
+    return BEAKER_SANDBOX_IMAGE if sandbox else BEAKER_DEFAULT_IMAGE
 
 
 def get_provider_kind(model_spec: str, default_kind: str | None = None) -> str | None:
@@ -285,6 +300,7 @@ def assemble_external_eval_job(
     base_url: str | None = None,
     user_env_vars: dict[str, str] | None = None,
     force_download_model: bool = False,
+    weka_buckets: list[str] | None = None,
 ) -> Any:
     """Assemble a BeakerJobConfig for running external evaluations.
 
@@ -309,13 +325,14 @@ def assemble_external_eval_job(
         inject_aws_credentials: Whether to inject AWS credentials.
         inject_gcs_credentials: Whether to inject GCS credentials.
         eval_args: Arguments to pass to external evaluations.
+        weka_buckets: Weka buckets to mount in addition to the defaults.
 
     Returns:
         Configured BeakerJobConfig.
     """
     from uuid import uuid4
 
-    from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
+    from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig, weka_buckets_with
 
     upload_args, upload_env = upload_job_settings(
         upload=upload,
@@ -439,6 +456,10 @@ def assemble_external_eval_job(
         for extra in collect_install_extras(scaffold_name=scaffold_name):
             if extra not in extras:
                 extras.append(extra)
+    for eval_name in external_evals:
+        for extra in get_external_eval(eval_name).extras:
+            if extra not in extras:
+                extras.append(extra)
 
     provider_packages = get_provider_dependencies(model) or None
 
@@ -467,6 +488,7 @@ def assemble_external_eval_job(
         extras=extras,
         provider_packages=provider_packages,
         vllm_isolated_venv=vllm_isolated_venv,
+        weka_buckets=weka_buckets_with(weka_buckets or ()),
     )
 
 
@@ -476,7 +498,7 @@ class JobConfigAssembler:
     def __init__(
         self,
         config: LaunchConfig,
-        effective_image: str,
+        effective_image: str | None,
         effective_groups: list[str],
         beaker_username: str,
         common_secrets: list[tuple[str, str]],
@@ -499,7 +521,7 @@ class JobConfigAssembler:
 
     def assemble(self, exp: ExperimentPlan) -> BeakerJobConfig:
         """Assemble a BeakerJobConfig for an experiment."""
-        from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig
+        from olmo_eval.launch import BeakerEnvSecret, BeakerJobConfig, weka_buckets_with
 
         command = self._build_command(exp)
 
@@ -529,6 +551,11 @@ class JobConfigAssembler:
 
         # Install for the provider the job will actually run with
         provider_kind = resolve_provider_kind(exp.model_spec, preset, self.config.harness_overrides)
+        # None means the caller left image selection to the resolved provider.
+        # Resolve per experiment so mixed-provider launches can use different bases.
+        effective_image = self.effective_image or default_beaker_image(
+            provider_kind, sandbox_enabled
+        )
         vllm_isolated_venv = provider_kind == "vllm_server"
         model_provider_extras = get_provider_extras(exp.model_spec, default_kind=provider_kind)
 
@@ -536,6 +563,7 @@ class JobConfigAssembler:
         # Keep companion extras like clients for vllm_server.
         provider_extra_override = (
             {
+                "sglang": "sglang",
                 "olmo_core": "olmo_core",
                 "olmo_core_vlm": "olmo_core_vlm",
                 "vllm": "vllm",
@@ -584,7 +612,7 @@ class JobConfigAssembler:
         }
         # Add infrastructure config for olmo-eval
         job_env_vars.update(BEAKER_INFRA_ENV_VARS)
-        job_env_vars.update(self._upload_settings(exp)[1])
+        job_env_vars.update(self._upload_settings(exp, image=effective_image)[1])
 
         if cluster_has_weka(self.config.cluster):
             job_env_vars.update(
@@ -629,6 +657,18 @@ class JobConfigAssembler:
                     setup_modal_gcp_secret = True
                     log.info(f"Modal GCP secret setup enabled: {secret_name}")
 
+        if (
+            (provider_kind == "sglang" or effective_image == BEAKER_SGLANG_IMAGE)
+            and "LD_LIBRARY_PATH" not in self.config.env_vars
+            and not any(secret.name == "LD_LIBRARY_PATH" for secret in env_secrets)
+        ):
+            # Select compatibility libraries on the actual host, before Python
+            # imports CUDA. Explicit library paths remain authoritative.
+            command = [
+                "bash",
+                "/gantry-runtime/src/olmo_eval/launch/beaker/scripts/cuda13_driver",
+                *command,
+            ]
         # User-supplied env vars win over everything above
         job_env_vars.update(self.config.env_vars)
 
@@ -663,7 +703,7 @@ class JobConfigAssembler:
             budget=self.config.budget,
             extras=install_extras,
             groups=self.effective_groups,
-            beaker_image=self.effective_image,
+            beaker_image=effective_image,
             inject_aws_credentials=self.inject_aws_credentials,
             inject_gcs_credentials=self.inject_gcs_credentials,
             inject_upload_credentials=self.config.upload,
@@ -675,9 +715,13 @@ class JobConfigAssembler:
             setup_registry_mirror=setup_registry_mirror,
             vllm_isolated_venv=vllm_isolated_venv,
             setup_modal_gcp_secret=setup_modal_gcp_secret,
+            weka_buckets=weka_buckets_with(self.config.weka_buckets),
+            resume_volume=self.config.resume_volume if self.config.resume else None,
         )
 
-    def _upload_settings(self, exp: ExperimentPlan) -> tuple[list[str], dict[str, str]]:
+    def _upload_settings(
+        self, exp: ExperimentPlan, *, image: str | None = None
+    ) -> tuple[list[str], dict[str, str]]:
         return upload_job_settings(
             upload=self.config.upload,
             launch_id=self.config.launch_id,
@@ -685,7 +729,7 @@ class JobConfigAssembler:
             tags=self.config.tags,
             clusters=_resolved_clusters(self.config.cluster),
             priority=exp.priority,
-            image=self.effective_image,
+            image=image or self.effective_image,
             budget=self.config.budget,
         )
 
@@ -718,7 +762,11 @@ class JobConfigAssembler:
         """Build the olmo-eval run command."""
         command: list[str] = ["olmo-eval", "run"]
 
-        command.extend(["-O", BEAKER_RESULT_DIR])
+        if not self.config.resume or self.config.resume_volume is None:
+            command.extend(["-O", BEAKER_RESULT_DIR])
+        # Every replacement runs this command; recovery is enabled unless explicitly disabled.
+        if self.config.resume:
+            command.append("--resume")
 
         command.extend(["-m", exp.model_spec])
 
@@ -776,4 +824,24 @@ class JobConfigAssembler:
         for override in self.config.harness_overrides:
             command.extend(["-o", override])
 
+        if self.config.resume and self.config.resume_volume is not None:
+            from olmo_eval.launch.beaker.volume import VOLUME_MOUNT
+
+            command = [
+                "python",
+                "-m",
+                "olmo_eval.launch.beaker.resume",
+                "--root",
+                VOLUME_MOUNT,
+                "--run-uuid",
+                str(uuid.uuid4()),
+                "--volume",
+                self.config.resume_volume,
+                "--retention-days",
+                str(self.config.resume_retention_days),
+                "--results",
+                BEAKER_RESULT_DIR,
+                "--",
+                *command,
+            ]
         return command

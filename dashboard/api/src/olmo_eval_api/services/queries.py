@@ -21,8 +21,11 @@ STALE_AFTER = timedelta(hours=24)
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
 
+# Runs that have not finished. Their upload is not complete, but they are shown; an
+# interrupted run waits for a resumed job to continue it under the same run ID.
+UNFINISHED = "r.status IN ('running', 'interrupted')"
 # Runs that list and aggregate endpoints show (spec 4.1).
-VISIBLE = "(r.upload_state = 'complete' OR r.status = 'running')"
+VISIBLE = f"(r.upload_state = 'complete' OR {UNFINISHED})"
 
 # Whether a task result (alias tr) ran with an instance limit, such as a smoke run.
 LIMITED = (
@@ -184,7 +187,11 @@ def model_detail(row: Mapping[Any, Any], prefix: str = "m_") -> a.ModelDetail:
 
 
 def is_stale(row: Mapping[Any, Any]) -> bool:
-    return row["status"] == "running" and row["updated_at"] < now_utc() - STALE_AFTER
+    """A run that should still be updating (running, or interrupted and awaiting a resume)
+    has not been updated for a day."""
+    return (
+        row["status"] in ("running", "interrupted") and row["updated_at"] < now_utc() - STALE_AFTER
+    )
 
 
 def run_summary_fields(row: Mapping[Any, Any]) -> dict[str, Any]:

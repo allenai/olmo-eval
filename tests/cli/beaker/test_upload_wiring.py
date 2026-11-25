@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from google.auth.exceptions import RefreshError
 
 from olmo_eval.cli.beaker.config_loader import LaunchConfig
 from olmo_eval.cli.beaker.experiment_plan import ExperimentPlan
@@ -14,9 +15,10 @@ from olmo_eval.cli.beaker.job_assembler import (
     assemble_external_eval_job,
     upload_job_settings,
 )
+from olmo_eval.common.constants.infrastructure import BEAKER_DEFAULT_IMAGE, BEAKER_SGLANG_IMAGE
 
 
-def _assemble(**config_overrides):
+def _assemble(*, effective_image="beaker://user/image", **config_overrides):
     launch_config = LaunchConfig(
         name="test",
         model_specs=["test-model"],
@@ -37,7 +39,7 @@ def _assemble(**config_overrides):
     )
     assembler = JobConfigAssembler(
         config=launch_config,
-        effective_image="beaker://user/image",
+        effective_image=effective_image,
         effective_groups=["group-a"],
         beaker_username="test-user",
         common_secrets=[],
@@ -75,6 +77,19 @@ def test_no_upload_is_forwarded_and_api_url_is_optional() -> None:
     assert "--no-upload" in job.command
     assert "--upload" not in job.command
     assert "OLMO_EVAL_API_URL" not in job.env_vars
+
+
+@pytest.mark.parametrize(
+    "kind,image", [("vllm", BEAKER_DEFAULT_IMAGE), ("sglang", BEAKER_SGLANG_IMAGE)]
+)
+def test_default_image_is_recorded_in_upload_provenance(kind, image) -> None:
+    _, job = _assemble(
+        effective_image=None,
+        harness="default",
+        harness_overrides=[f"provider.kind={kind}"],
+    )
+    assert job.beaker_image == image
+    assert job.env_vars["OLMO_EVAL_BEAKER_IMAGE"] == image
 
 
 def test_launch_ids_differ_between_launches() -> None:
@@ -137,11 +152,34 @@ def test_no_upload_skips_the_uploader_key() -> None:
 def test_launch_stops_without_google_credentials(capsys) -> None:
     from olmo_eval.cli.beaker.launch import _require_upload_credentials
 
-    with patch("olmo_eval.upload.auth.has_local_google_credentials", return_value=False):
+    with (
+        patch("olmo_eval.upload.auth.has_local_google_credentials", return_value=False),
+        patch(
+            "olmo_eval.launch.beaker.uploader.uploader_secret_exists", return_value=False
+        ) as exists,
+    ):
         with pytest.raises(SystemExit):
-            _require_upload_credentials(upload=True, dry_run=False)
-        _require_upload_credentials(upload=True, dry_run=True)  # warns only
-        _require_upload_credentials(upload=False, dry_run=False)
+            _require_upload_credentials(upload=True, dry_run=False, workspace="ai2/ws")
+        exists.assert_called_once_with("ai2/ws")
+        _require_upload_credentials(upload=True, dry_run=True, workspace="ai2/ws")  # warns only
+        _require_upload_credentials(upload=False, dry_run=False, workspace="ai2/ws")
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [{"return_value": False}, {"side_effect": RefreshError("Reauthentication failed.")}],
+    ids=["missing", "expired"],
+)
+def test_launch_without_usable_credentials_uses_existing_secret(credentials, capsys) -> None:
+    from olmo_eval.cli.beaker.launch import _require_upload_credentials
+
+    with (
+        patch("olmo_eval.upload.auth.has_local_google_credentials", **credentials),
+        patch("olmo_eval.launch.beaker.uploader.uploader_secret_exists", return_value=True),
+    ):
+        _require_upload_credentials(upload=True, dry_run=False, workspace="ai2/ws")
+    out = " ".join(capsys.readouterr().out.split())  # Rich wraps at the terminal width
+    assert "existing olmo_eval_uploader_key secret in ai2/ws" in out
 
 
 def test_launch_cli_resolves_upload_from_env(monkeypatch) -> None:
@@ -166,3 +204,11 @@ def test_launch_cli_resolves_upload_from_env(monkeypatch) -> None:
     assert captured["upload"] is False
     assert captured["api_url"] == "https://dev-ingest.example"
     assert captured["tags"] == ["x"]
+
+
+def test_job_command_resumes_from_its_results() -> None:
+    """Every job of a task runs the same command, so a requeued or retried job continues."""
+    _, job = _assemble(upload=False)
+
+    assert "--resume" in job.command
+    assert "--fresh" not in job.command

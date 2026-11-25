@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
+from pathlib import Path
 
 from olmo_eval.common.logging import get_logger
 from olmo_eval.runners.common.types import PREDICTIONS_SUFFIX, REQUESTS_SUFFIX
@@ -23,6 +23,21 @@ def _lazy_loader_placeholder(obj: object) -> str:
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
+def output_path(
+    output_dir: str | Path,
+    kind: str,
+    spec: str,
+    model_name: str,
+    task_hash: str | None = None,
+) -> Path:
+    """Path of a task's ``predictions`` or ``requests`` file, as the writers below name it."""
+    suffix = {"predictions": PREDICTIONS_SUFFIX, "requests": REQUESTS_SUFFIX}[kind]
+    name = sanitize_spec_for_filename(spec)
+    if task_hash:
+        name = f"{name}_{task_hash[-6:]}"
+    return Path(output_dir) / kind / sanitize_spec_for_filename(model_name) / f"{name}{suffix}"
+
+
 def write_predictions_jsonl(
     output_dir: str,
     spec: str,
@@ -39,15 +54,8 @@ def write_predictions_jsonl(
         model_name: Model name or alias (used for subdirectory)
         task_hash: Optional task config hash (last 6 chars added to filename)
     """
-    pred_dir = os.path.join(output_dir, "predictions", sanitize_spec_for_filename(model_name))
-    os.makedirs(pred_dir, exist_ok=True)
-
-    # Build filename with optional hash suffix
-    base_name = sanitize_spec_for_filename(spec)
-    if task_hash:
-        base_name = f"{base_name}_{task_hash[-6:]}"
-    filename = base_name + PREDICTIONS_SUFFIX
-    filepath = os.path.join(pred_dir, filename)
+    filepath = output_path(output_dir, "predictions", spec, model_name, task_hash)
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
     with open(filepath, "w") as f:
         for pred in predictions:
@@ -75,15 +83,8 @@ def write_requests_jsonl(
         model_name: Model name or alias (used for subdirectory)
         task_hash: Optional task config hash (last 6 chars added to filename)
     """
-    req_dir = os.path.join(output_dir, "requests", sanitize_spec_for_filename(model_name))
-    os.makedirs(req_dir, exist_ok=True)
-
-    # Build filename with optional hash suffix
-    base_name = sanitize_spec_for_filename(spec)
-    if task_hash:
-        base_name = f"{base_name}_{task_hash[-6:]}"
-    filename = base_name + REQUESTS_SUFFIX
-    filepath = os.path.join(req_dir, filename)
+    filepath = output_path(output_dir, "requests", spec, model_name, task_hash)
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
     with open(filepath, "w") as f:
         for req in requests:

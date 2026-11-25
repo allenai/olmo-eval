@@ -43,6 +43,27 @@ export type DateTime = string;
 export type JsonObject = { [key: string]: unknown };
 
 /**
+ * A task's scoring failures. An unscored instance has no scored output and is left out
+ * of the metrics; with instances that produced no output it counts against the task's
+ * failure budget. A partially scored instance is scored from the outputs that were.
+ */
+export interface ScoringFailures {
+    instances_unscored: NonNegativeInt32;
+    instances_partially_scored: NonNegativeInt32;
+    /** Outputs with a scoring error, across all instances. */
+    outputs_unscored: NonNegativeInt32;
+    /** Unscored outputs whose failure was flagged as infrastructure (judge, sandbox). */
+    infrastructure: NonNegativeInt32;
+    /** Unscored outputs by exception type, from each output's first error. */
+    by_type: { [type: string]: NonNegativeInt32 };
+    /**
+     * The first scoring error as "Type: message", capped at 500 characters.
+     * @maxLength 500
+     */
+    first_error?: string | null;
+}
+
+/**
  * Run ID. olmo-eval uses its experiment_id (12 lowercase hex characters).
  * @pattern ^[a-z0-9]{6,32}$
  */
@@ -67,7 +88,12 @@ export type NestedMetrics = { [metric: string]: { [scorer: string]: number | nul
 /** Flat metrics keyed by "metric_name:scorer_name". */
 export type FlatMetrics = { [metricKey: string]: number | null };
 
-export type RunStatus = "running" | "complete" | "partial" | "failed";
+/**
+ * "interrupted" is not final: the run stopped (SIGTERM) but can resume under the same run ID,
+ * so a later "running" upsert moves it back to "running". complete, partial and failed are
+ * final.
+ */
+export type RunStatus = "running" | "interrupted" | "complete" | "partial" | "failed";
 export type FinalRunStatus = "complete" | "partial" | "failed";
 export type UploadState = "uploading" | "complete";
 
@@ -147,7 +173,7 @@ export interface EnvironmentInfo {
     hostname: string | null;
     platform: string | null;
     python_version: string | null;
-    /** Installed distribution versions: "olmo-eval", "vllm", "torch", "transformers", "datasets", "litellm" when present. */
+    /** Installed distribution versions: "olmo-eval", "vllm", "torch", "transformers", "datasets", "litellm" when present. When the vLLM server runs from its own venv, that venv's versions appear as "vllm-venv/vllm", "vllm-venv/torch" and "vllm-venv/transformers". */
     packages: { [distribution: string]: string };
     cuda_version: string | null;
     /** e.g. "NVIDIA H100 80GB HBM3". */
@@ -221,7 +247,8 @@ export interface ModelInfo {
 
 /**
  * Create or update a run. Sent once when the run starts (status "running") and
- * again at the end with the final status. Re-sending is safe.
+ * again at the end with the final status, or with "interrupted" when a resumable run is
+ * stopped. Re-sending is safe.
  */
 export interface RunUpsertRequest {
     protocol_version: 1;
@@ -234,7 +261,7 @@ export interface RunUpsertResponse {
     run_id: RunId;
     /** True when this request created the run. */
     created: boolean;
-    /** Status after the upsert (a final status is never downgraded to "running"). */
+    /** Status after the upsert (a final status is never downgraded to "running" or "interrupted"). */
     status: RunStatus;
     upload_state: UploadState;
     /** gs:// URI of the run's artifact prefix, ending in "/". */
@@ -344,6 +371,10 @@ export interface TaskResultIn {
     num_instances: NonNegativeInt32;
     instances_processed: NonNegativeInt32 | null;
     instances_failed: NonNegativeInt32 | null;
+    /** Per-generation diagnostic counts; absent for older clients and loglikelihood tasks. */
+    generation_counts?: { [count: string]: NonNegativeInteger } | null;
+    /** Outputs and instances whose scores could not be computed; absent when none failed. */
+    scoring_failures?: ScoringFailures | null;
     error: string | null;
     error_summary: JsonObject | null;
     /**
@@ -361,10 +392,32 @@ export interface TaskResultIn {
     /** Completion tokens over every request of the task, including failed instances. */
     completion_tokens_total?: NonNegativeInteger | null;
     /**
-     * Inference seconds attributed to this task from per-batch inference metrics (each batch's
-     * wall time split by the task's share of the batch's tokens). Null unless recorded.
+     * Inference worker seconds attributed to this task. Each worker's busy time is split evenly
+     * across the batches and agent rollouts in flight, and a batch's share across its requests by
+     * token share. This is the worker's occupancy, not GPU time: agent rollouts include their tool
+     * and sandbox time, and are credited while they wait on them. Summed over workers, so a
+     * run with N inference workers attributes up to N times its processing time. Null unless
+     * recorded.
      */
     attributed_inference_seconds?: number | null;
+    /**
+     * Summed durations of the judge model calls made while scoring this task. Each call is timed
+     * on its own, so concurrent calls all count and the total can exceed wall time. Null means not
+     * recorded; 0 means measured with no judge calls.
+     */
+    scoring_judge_seconds?: number | null;
+    /**
+     * Summed durations of the sandbox operations made while scoring this task. Concurrent
+     * operations all count, so the total can exceed wall time. Null means not recorded; 0 means
+     * measured with no sandbox operations.
+     */
+    scoring_sandbox_seconds?: number | null;
+    /**
+     * Time spent running the task's scoring code (answer extraction, scorers and metrics) on the
+     * event loop, in a scoring thread or in a process pool. Pool work runs in parallel, so the
+     * total can exceed wall time. Null means not recorded.
+     */
+    scoring_compute_seconds?: number | null;
     predictions_path: RelativePath | null;
     requests_path: RelativePath | null;
     /** Registered suites that contain this task spec (static membership). */
@@ -557,7 +610,7 @@ export interface SuiteChildIn {
 /** One suite aggregation from metrics/results "suites", plus its definition. */
 export interface SuiteResultIn {
     name: string;
-    /** none, average, weighted_average, average_of_averages, display_only. */
+    /** none, average, weighted_average, average_of_averages, display_only, gap. */
     /** @maxLength 32 */
     aggregation: string;
     /** Parent suite name for nested suites, else null. */
@@ -565,10 +618,11 @@ export interface SuiteResultIn {
     description: string | null;
     /** Direct children from the registered Suite definition (or the contributing tasks when unregistered). */
     children: SuiteChildIn[];
+    /** A gap suite retains primary_score reference, companion, and gap diagnostics. */
     metrics: NestedMetrics;
-    /** "primary_score:average" for olmo-eval suites. */
+    /** Suite primary metric, such as primary_score:average or primary_score:companion. */
     primary_metric: string | null;
-    /** Suite primary score, null for display_only/none. */
+    /** Suite primary score; the held-out companion for gap, null for display_only/none or an incomplete gap. */
     score: number | null;
     num_tasks: NonNegativeInt32 | null;
 }

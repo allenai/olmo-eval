@@ -6,18 +6,44 @@ tool or variable never blocks an upload.
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
 import socket
 import subprocess
+import sys
 from collections.abc import Mapping
 from functools import lru_cache
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from typing import Any
 
-TRACKED_PACKAGES = ("olmo-eval", "vllm", "torch", "transformers", "datasets", "litellm", "sglang")
+from olmo_eval.common.logging import get_logger
+
+logger = get_logger(__name__)
+
+TRACKED_PACKAGES = (
+    "olmo-eval",
+    "vllm",
+    "torch",
+    "transformers",
+    "datasets",
+    "litellm",
+    "sglang",
+    "olmo-sglang",
+    "flash-linear-attention",
+)
+
+
+def package_revision(name: str) -> str | None:
+    """Read the installed VCS commit without importing GPU packages or exposing URLs."""
+    try:
+        direct_url = json.loads(distribution(name).read_text("direct_url.json") or "{}")
+        commit = direct_url.get("vcs_info", {}).get("commit_id")
+        return commit if isinstance(commit, str) else None
+    except (PackageNotFoundError, OSError, ValueError, AttributeError, TypeError):
+        return None
 
 
 def get_author() -> str:
@@ -45,16 +71,84 @@ def olmo_eval_version() -> str | None:
         return None
 
 
-def package_versions() -> dict[str, str]:
-    """Installed versions of the packages that most affect results."""
+# The vLLM server can run from its own venv (VLLM_PYTHON, set by the Beaker launcher),
+# whose packages the main interpreter cannot see.
+VLLM_VENV_PACKAGES = ("vllm", "torch", "transformers")
+VLLM_VENV_PREFIX = "vllm-venv/"
+
+_VERSIONS_SCRIPT = """
+import json, sys
+from importlib.metadata import PackageNotFoundError, version
+out = {}
+for name in sys.argv[1:]:
+    try:
+        out[name] = version(name)
+    except PackageNotFoundError:
+        pass
+print(json.dumps(out))
+"""
+
+
+@lru_cache(maxsize=4)
+def interpreter_package_versions(python: str, names: tuple[str, ...]) -> dict[str, str]:
+    """Versions of ``names`` installed for another Python interpreter; empty on failure.
+
+    A failure is cached too, so a timeout at run start doesn't stall the final manifest.
+    """
+    out = _run([python, "-I", "-c", _VERSIONS_SCRIPT, *names], timeout=15.0)
+    if not out:
+        return {}
+    try:
+        parsed = json.loads(out)
+    except ValueError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items() if isinstance(v, str)}
+
+
+def _separate_vllm_python(env: Mapping[str, str]) -> str | None:
+    vllm_python = env.get("VLLM_PYTHON")
+    if not vllm_python or not os.path.exists(vllm_python):
+        return None
+    # Compare environments, not binaries: venv interpreters are symlinks to a shared
+    # base Python, so two venvs on the same version resolve to the same file.
+    venv_dir = os.path.dirname(os.path.dirname(os.path.abspath(vllm_python)))
+    try:
+        if os.path.samefile(venv_dir, sys.prefix):
+            return None
+    except OSError:
+        return None
+    return vllm_python
+
+
+def package_versions(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Installed versions of the packages that most affect results.
+
+    When the vLLM server runs from a separate venv, that venv's versions are added
+    under ``vllm-venv/<name>``, and its vLLM is recorded as ``vllm`` because that venv
+    is the one serving.
+    """
+    env = os.environ if env is None else env
     versions: dict[str, str] = {}
     for name in TRACKED_PACKAGES:
         try:
             versions[name] = version(name)
+            if name in {"sglang", "olmo-sglang", "flash-linear-attention"}:
+                commit = package_revision(name)
+                if commit:
+                    versions[name] += f"@{commit}"
         except PackageNotFoundError:
             continue
         except Exception:
             continue
+    vllm_python = _separate_vllm_python(env)
+    if vllm_python:
+        isolated = interpreter_package_versions(vllm_python, VLLM_VENV_PACKAGES)
+        for name, value in isolated.items():
+            versions[VLLM_VENV_PREFIX + name] = value
+        if "vllm" in isolated:
+            versions["vllm"] = isolated["vllm"]
     return versions
 
 
@@ -96,6 +190,42 @@ def _local_git_info() -> dict[str, Any]:
         "branch": None if branch_name in (None, "", "HEAD") else branch_name,
         "dirty": None if status is None else bool(status.strip()),
     }
+
+
+@lru_cache(maxsize=1)
+def uncommitted_diff_hash() -> str | None:
+    """Short hash of the tracked files' uncommitted changes in the olmo_eval checkout.
+
+    Staged and unstaged edits are both in ``git diff HEAD``. Untracked files are not,
+    which matches the dirty flag of :func:`git_info`. The diff is hashed as bytes, so a
+    file that is not UTF-8 is covered, and without text conversion or external diff
+    drivers, so the hash does not depend on the user's git configuration. ``--binary``
+    puts a binary file's full content in the diff. None when git
+    cannot say, in which case a resume does not detect code changes.
+    """
+    import hashlib
+
+    import olmo_eval
+
+    cwd = Path(olmo_eval.__file__).resolve().parent
+    try:
+        result = subprocess.run(
+            ["git", "diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "--binary"],
+            cwd=cwd,
+            capture_output=True,
+            timeout=30.0,
+            check=False,
+        )
+        diff = result.stdout if result.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        diff = None
+    if diff is None:
+        logger.warning(
+            "Could not hash the uncommitted changes with git; code-change detection is off "
+            "for this run, so a resume will not notice edits made in between."
+        )
+        return None
+    return hashlib.sha256(diff).hexdigest()[:12]
 
 
 def git_info(env: Mapping[str, str] | None = None) -> dict[str, Any]:
