@@ -28,8 +28,9 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
   the data row's one fixed example instead, for an ablation.
 - **Identity**: new task hashes.
 - **Comparability**: `:v3` matches upstream RULER's VT prompt; `:v2` does not. Scores are
-  not comparable across the three. `:v3` usually scores lower than `:v2`: models,
-  small ones and long contexts especially, often answer with the example's variables.
+  not comparable across the three. `:v3` can score lower than `:v2`: models often answer
+  with the example's variables, more so at long contexts. For others the example fixes the
+  answer format at short contexts.
 
 ## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
 
