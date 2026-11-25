@@ -16,6 +16,7 @@ from .registry import (
     register_sampling_variant,
     register_subtasks,
     register_variant,
+    resolve_task_spec,
     task_exists,
 )
 
@@ -39,5 +40,6 @@ __all__ = [
     "register_sampling_variant",
     "register_subtasks",
     "register_variant",
+    "resolve_task_spec",
     "task_exists",
 ]

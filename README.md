@@ -1393,11 +1393,15 @@ uv run olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --to
 
 # Export as JSON for programmatic use
 uv run olmo-eval task inspect arc_easy --json
+
+# Show how a spec resolves: task class, variants in order, metrics and primary metric
+uv run olmo-eval task inspect mbpp:olmo3base:bpb --config
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-n, --count` | Number of instances to display |
+| `--config` | Show how the spec resolves, without loading data; with `--json`, prints only that |
 | `-s, --skip` | Number of instances to skip |
 | `--instance` | Show instance details (default if no other flags) |
 | `--request` | Show the LM request |

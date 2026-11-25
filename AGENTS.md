@@ -43,6 +43,7 @@ uv run pytest tests/ --ignore=tests/integration -v
 - For docs-only changes, check links, paths, and documented commands instead.
 - Discovery without a model: `olmo-eval tasks -f <name>`, `olmo-eval suites`,
   `olmo-eval suite inspect <suite>`, `olmo-eval task inspect <spec> --request`,
+  `olmo-eval task inspect <spec> --config` (task class, variant order, metrics, primary),
   `olmo-eval run -m mock -t <spec> -o limit=5`.
 
 ## Before running an eval
