@@ -271,3 +271,30 @@ def test_build_predictions_keeps_every_turn_of_a_conversation() -> None:
     output = build_predictions([response])[0]["model_output"][0]
 
     assert output[TURNS_KEY] == turns
+
+
+def test_build_predictions_keeps_rolling_fields_and_divides_by_scored_bytes() -> None:
+    rolling = {
+        "num_windows": 3,
+        "window_tokens": 8191,
+        "prefix_tokens": 0,
+        "scored_bytes": 9,
+    }
+    response = Response(
+        instance=Instance(question="", gold_answer="hello world"),
+        request=LMRequest(
+            request_type=RequestType.LOGLIKELIHOOD, continuations=("hello world",), rolling=True
+        ),
+        outputs=[
+            LMOutput(
+                text="hello world",
+                logprobs=[{"token": "x", "logprob": -1.0} for _ in range(2)],
+                metadata={"sum_logits": -2.0, **rolling},
+            )
+        ],
+    )
+
+    output = build_predictions([response])[0]["model_output"][0]
+
+    assert {key: output[key] for key in rolling} == rolling
+    assert output["bits_per_byte"] == 2.0 / (9 * math.log(2))

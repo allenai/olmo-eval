@@ -228,6 +228,15 @@ class SQuADF1Scorer(Scorer):
         return max(_compute_squad_f1(pred, ref) for ref in all_answers)
 
 
+def scored_bytes(output: LMOutput, text: str | None) -> int:
+    """Bytes of ``text`` the logprobs cover: all of them, unless the provider set
+    ``scored_bytes`` (a rolling text that leaves its first token unscored)."""
+    scored = (output.metadata or {}).get("scored_bytes")
+    if scored is not None:
+        return int(scored)
+    return len(text.encode("utf-8")) if text else 0
+
+
 @dataclass(frozen=True, slots=True)
 class BitsPerByteScorer(Scorer):
     """Compute bits per byte from logprobs.
@@ -251,7 +260,7 @@ class BitsPerByteScorer(Scorer):
         # The logprobs cover the whole generation; if strip_thinking removed a
         # reasoning trace from output.text, normalize by the original text.
         text = (output.metadata or {}).get("original_text") or output.text
-        num_bytes = len(text.encode("utf-8")) if text else 0
+        num_bytes = scored_bytes(output, text)
 
         if num_bytes == 0:
             return 0.0

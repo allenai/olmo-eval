@@ -18,6 +18,7 @@ from olmo_eval.common.scorers import (
     SubstringRecallScorer,
     ToolCallScorer,
 )
+from olmo_eval.common.scorers.base import scored_bytes
 from olmo_eval.common.types import Response
 from olmo_eval.common.utils import compute_pass_at_k, compute_pass_pow_k
 
@@ -187,8 +188,7 @@ def _select_gold_output(response: Response):
     if output.logprobs is None:
         return None
 
-    num_bytes = len(output.text.encode("utf-8")) if output.text else 0
-    if num_bytes == 0:
+    if scored_bytes(output, output.text) == 0:
         return None
 
     return output
@@ -307,7 +307,7 @@ class BPBMetricByteAvg(Metric):
             if output is None:
                 continue
 
-            num_bytes = len(output.text.encode("utf-8")) if output.text else 0
+            num_bytes = scored_bytes(output, output.text)
             if num_bytes == 0:
                 continue
             bpb = scorer.score(response.instance, output)

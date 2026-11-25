@@ -2,7 +2,9 @@
 
 Each document is scored on its own as one rolling request, so a document longer
 than ``max_length`` is scored in full in windows of ``max_length``. The tasks
-require ``max_length`` so the window is part of the task hash. A source is
+require ``max_length`` so the window is part of the task hash. A document starts
+with whatever the tokenizer puts in front (BOS or nothing), and its first token is
+context, not scored, so every model is scored on the same text. A source is
 byte-weighted over all its documents; the paper instead averages over a source's
 domains, which the saved ``subdomain`` lets you recompute.
 """
@@ -57,6 +59,9 @@ class PalomaBase(Task):
     """One Paloma source, each document scored as raw text in full."""
 
     split = Split.VALIDATION
+    #: Only marks the hash: the vllm provider starts every rolling text with the
+    #: tokenizer's own prefix and leaves its first token unscored (result-compatibility.md).
+    task_settings = {"rolling_prefix": "tokenizer", "rolling_first_token": "context"}
     metrics = (BPBMetricByteAvg(),)
     primary_metric = BPBMetricByteAvg()
 
@@ -94,7 +99,7 @@ class PalomaBase(Task):
         )
 
     def format_request(self, instance: Instance) -> LMRequest:
-        """Score the document from BOS in windows of ``max_length``."""
+        """Score the document in windows of ``max_length``, from the tokenizer's prefix."""
         if self.config.formatter is not None:
             # A formatter's request would not roll, so long documents would be truncated.
             raise ValueError("Paloma tasks score raw text and do not take a formatter")

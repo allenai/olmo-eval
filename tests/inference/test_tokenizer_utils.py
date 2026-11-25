@@ -8,10 +8,12 @@ from __future__ import annotations
 import pytest
 
 from olmo_eval.inference.tokenizer_utils import (
+    default_prefix_ids,
     encode_context_and_continuation,
     get_bos_token_ids,
     get_context_token_ids,
     has_bos_token,
+    leading_token_bytes,
     rolling_token_windows,
 )
 
@@ -183,24 +185,26 @@ class TestRollingTokenWindows:
     def _scored(self, windows: list[tuple[list[int], int]]) -> list[int]:
         return [token for input_ids, ctxlen in windows for token in input_ids[ctxlen:]]
 
-    def test_short_text_is_one_input_after_the_prefix(self):
-        assert rolling_token_windows([0], [1, 2, 3], max_len=8) == [([0, 1, 2, 3], 1)]
+    def test_short_text_is_one_input_with_the_first_token_as_context(self):
+        assert rolling_token_windows([0], [1, 2, 3], max_len=8) == [([0, 1, 2, 3], 2)]
 
     def test_windows_condition_on_the_token_before_and_the_last_keeps_full_context(self):
         # Only token 10 is left for the last window; it gets three tokens of context, not one.
         assert rolling_token_windows([0], list(range(1, 11)), max_len=4) == [
-            ([0, 1, 2, 3], 1),
+            ([0, 1, 2, 3], 2),
             ([3, 4, 5, 6], 1),
             ([6, 7, 8, 9], 1),
             ([7, 8, 9, 10], 3),
         ]
 
-    def test_every_token_is_scored_once_from_contiguous_inputs(self):
-        prefix, tokens = [0], list(range(1, 30))
+    @pytest.mark.parametrize("prefix", [[], [0]])
+    def test_every_token_after_the_first_is_scored_once_from_contiguous_inputs(self, prefix):
+        tokens = list(range(1, 30))
         sequence = prefix + tokens
-        for max_len in range(2, 12):
+        for max_len in range(len(prefix) + 2, 12):
             windows = rolling_token_windows(prefix, tokens, max_len)
-            assert self._scored(windows) == tokens
+            assert self._scored(windows) == tokens[1:]
+            assert windows[0][0][: len(prefix) + 1] == sequence[: len(prefix) + 1]
             for input_ids, ctxlen in windows:
                 start = sequence.index(input_ids[0])
                 assert sequence[start : start + len(input_ids)] == input_ids
@@ -209,10 +213,44 @@ class TestRollingTokenWindows:
     def test_text_that_exactly_fills_the_first_input_needs_no_second(self):
         assert len(rolling_token_windows([0], [1, 2, 3], max_len=4)) == 1
 
-    def test_needs_a_prefix_to_score_the_first_token(self):
-        with pytest.raises(ValueError, match="needs a prefix"):
-            rolling_token_windows([], [1, 2], max_len=4)
+    @pytest.mark.parametrize("prefix", [[], [0]])
+    @pytest.mark.parametrize("tokens", [[], [7]])
+    def test_a_text_under_two_tokens_scores_nothing(self, prefix, tokens):
+        assert rolling_token_windows(prefix, tokens, max_len=4) == []
 
-    def test_needs_room_after_the_prefix(self):
+    def test_needs_room_after_the_prefix_and_first_token(self):
         with pytest.raises(ValueError, match="leaves no room"):
-            rolling_token_windows([0, 1], [2], max_len=2)
+            rolling_token_windows([0, 1], [2, 3], max_len=3)
+
+
+class _CharTokenizer:
+    """One token per character; with special tokens, ``prefix`` in front and ``suffix`` after."""
+
+    def __init__(self, prefix: list[int], suffix: list[int] | None = None) -> None:
+        self.prefix, self.suffix = prefix, suffix or []
+
+    def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
+        ids = [ord(c) for c in text]
+        return [*self.prefix, *ids, *self.suffix] if add_special_tokens else ids
+
+    def decode(self, ids: list[int]) -> str:
+        return "".join(chr(i) for i in ids)
+
+
+class TestDefaultPrefixIds:
+    def test_is_the_bos_a_tokenizer_adds_in_front(self):
+        assert default_prefix_ids(_CharTokenizer([1])) == [1]
+
+    def test_is_empty_for_a_tokenizer_that_adds_nothing_in_front(self):
+        # An EOS appended after the text is not a prefix.
+        assert default_prefix_ids(_CharTokenizer([], suffix=[2])) == []
+
+
+class TestLeadingTokenBytes:
+    def test_counts_the_bytes_the_first_token_decodes_to(self):
+        assert leading_token_bytes(_CharTokenizer([]), "été", ord("é")) == 2
+
+    def test_a_token_that_splits_a_character_counts_the_whole_character(self):
+        tokenizer = _CharTokenizer([])
+        tokenizer.decode = lambda ids: "\ufffd"  # a byte-level piece of a character
+        assert leading_token_bytes(tokenizer, "日本", 0xE6) == 3
