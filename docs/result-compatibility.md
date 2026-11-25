@@ -16,6 +16,14 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-25: Add base model safety suite variant without the \n\n stopping condition (#583)
+- **Affected**: all tasks and variants that use the safety implementation of the llm as a judge
+- **Change**: responses with only whitespace characters count as empty instead of being passed
+  to the judge for grading.
+- **Identity**: task hash does not change
+- **Comparability**: before and after are not directly comparable without checking the
+  empty statistic
+
 ## 2026-11-12: Namespaced Hugging Face dataset ids for six tasks (#558)
 
 - **Affected**: every spec of `gsm8k` (except `gsm8k:platinum`, which has its own
