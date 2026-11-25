@@ -16,23 +16,26 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
-## 2026-11-24: Paloma documents start with the tokenizer's own prefix
+## 2026-11-24: Paloma documents start with the tokenizer's own prefix, first token unscored
 
 - **Affected**: the 16 `paloma_<source>` tasks and the `paloma` suite, and any other
   rolling log-likelihood request (`LMRequest.rolling`) on the `vllm` provider.
-- **Change**: a rolling text used to start with BOS, or EOS when the tokenizer has no BOS.
-  It now starts with what the tokenizer puts in front of a text (`default_prefix_ids`).
-  For a tokenizer that adds nothing (OLMo, Qwen), the text starts cold: its first token is
-  context, the rest are scored, and bits per byte divides by the bytes scored. Long-context
-  checkpoints that never saw an EOS before a document scored far worse after one (macro
-  bits per byte up to 2.9 instead of about 1.1). Tokenizers that add BOS score exactly as
-  before. Outputs and prediction files now record `num_windows`, `window_tokens`,
-  `prefix_tokens` and `scored_bytes`.
-- **Identity**: the Paloma tasks set `task_settings={"rolling_prefix": "tokenizer"}`, so
-  all 16 task hashes change.
-- **Comparability**: for models whose tokenizer adds BOS, earlier Paloma results are
-  unchanged and comparable. For models whose tokenizer adds no BOS, earlier results scored
-  every document after an EOS and should be rerun.
+- **Change**: a rolling text used to start with BOS, or EOS when the tokenizer has no BOS,
+  and every token of the text was scored. It now starts with what the tokenizer puts in
+  front of a text (`default_prefix_ids`: BOS, or nothing for OLMo and Qwen), and for every
+  tokenizer its first token is context. The rest are scored, and bits per byte divides by
+  the bytes scored. Leaving the first token out for every model, with or without BOS,
+  keeps scores comparable across tokenizers. Long-context checkpoints, which were trained
+  on packed sequences that start at a document and never saw an EOS at position 0, scored
+  far worse after one (macro bits per byte up to 2.9 instead of about 1.2). Outputs and
+  prediction files now record `num_windows`, `window_tokens`, `prefix_tokens` and
+  `scored_bytes`.
+- **Identity**: the Paloma tasks set `task_settings={"rolling_prefix": "tokenizer",
+  "rolling_first_token": "context"}`, so all 16 task hashes change.
+- **Comparability**: earlier Paloma results are not comparable for any model and should be
+  rerun. For tokenizers that add BOS (Llama 3), the change is small: each document loses
+  its first token. For tokenizers that add nothing (OLMo, Qwen), earlier results scored
+  every document after an EOS.
 
 ## 2026-11-16: RULER VT `:v3` re-draws its worked example per instance
 
