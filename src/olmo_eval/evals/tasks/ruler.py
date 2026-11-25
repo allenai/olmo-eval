@@ -374,7 +374,9 @@ def randomize_vt_example(
         new_names[name] = new
     while (new_value := str(rng.randint(10000, 99999))) in (value.group(1), avoid_value):
         pass
-    pattern = re.compile(r"\b(" + "|".join(map(re.escape, new_names)) + r"|" + value.group(1) + r")\b")
+    pattern = re.compile(
+        r"\b(" + "|".join(map(re.escape, new_names)) + r"|" + value.group(1) + r")\b"
+    )
     return pattern.sub(lambda m: new_names.get(m.group(1), new_value), example)
 
 

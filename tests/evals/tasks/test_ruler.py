@@ -171,7 +171,9 @@ def test_the_example_keeps_its_chain_with_new_names_and_value():
     assert out.count(value.group(2)) == 3  # the assignment, the question and the answer
     assert f"VAR {names[1]} = VAR {names[0]}" in out and f"VAR {names[2]} = VAR {names[1]}" in out
     assert out.replace(value.group(2), "#") == re.sub(
-        r"\b(QPE|SEJ|ZQO)\b", lambda m: names[["QPE", "SEJ", "ZQO"].index(m.group(1))], _EXAMPLE.strip()
+        r"\b(QPE|SEJ|ZQO)\b",
+        lambda m: names[["QPE", "SEJ", "ZQO"].index(m.group(1))],
+        _EXAMPLE.strip(),
     ).replace("64886", "#")
 
 
@@ -205,7 +207,7 @@ def test_v3_is_v2_plus_the_example_and_exists_only_for_vt():
     assert v3.sampling_params == v2.sampling_params
     assert _scored_text("ruler_vt__4096:v3", " A.\nQuestion: B") == " A.\n"
     assert _scored_text("ruler_vt__4096:v3", "VAR A", cut_tokens=3) == ""
-    with pytest.raises(Exception):
+    with pytest.raises(KeyError, match="Unknown variant 'v3'"):
         get_task("ruler_niah_s_1__4096:v3")
 
 
