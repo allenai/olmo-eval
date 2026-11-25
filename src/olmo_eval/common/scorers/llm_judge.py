@@ -797,7 +797,9 @@ class SafetyScorer(LLMJudgeScorer):
     ) -> str:
         """Format the judge prompt according to wildguard or standard safety standards."""
 
-        output.metadata["is_empty_response"] = output.extracted_answer == ""
+        output.metadata["is_empty_response"] = (
+            output.extracted_answer is not None and not output.extracted_answer.strip()
+        )
         model_answer = output.text if output.extracted_answer is None else output.extracted_answer
         judged_prompt = (
             instance.metadata.get("vanilla_prompt")
