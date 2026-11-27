@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -20,6 +21,7 @@ from olmo_eval.harness.scaffolds.vanillux import (
     SUBMIT_MARKER,
     SYSTEM_TEMPLATE,
     TOO_LONG_HINT,
+    RunProgress,
     format_observation,
     parse_action,
     render_instance,
@@ -365,6 +367,124 @@ async def test_token_usage_is_summed_over_steps() -> None:
 
     assert result.metadata["usage"] == {"prompt_tokens": 20, "completion_tokens": 10}
     assert [t["cmd"] for t in result.metadata["timing"]] == ["ls", f"echo {SUBMIT_MARKER}"]
+
+
+@pytest.mark.anyio
+async def test_each_reply_logs_its_token_count_and_finish_reason() -> None:
+    cut = LMOutput(
+        text="THOUGHT: cut", metadata={"completion_tokens": 7, "finish_reason": "length"}
+    )
+    submit = LMOutput(
+        text="THOUGHT: done",
+        tool_calls=[ToolCall.create("call-2", "bash", {"command": f"echo {SUBMIT_MARKER}"})],
+        metadata={"completion_tokens": 3, "finish_reason": "tool_calls"},
+    )
+    provider = ScriptedProvider([cut, bash_reply("ls"), submit])
+
+    result, _ = await run(provider)
+
+    timing = result.metadata["timing"]
+    assert [(t["completion_tokens"], t["finish_reason"]) for t in timing] == [
+        (7, "length"),
+        (5, None),
+        (3, "tool_calls"),
+    ]
+    assert timing[0]["format_error"] is True
+    assert (
+        sum(t["completion_tokens"] for t in timing) == result.metadata["usage"]["completion_tokens"]
+    )
+
+
+class StallingProvider(ScriptedProvider):
+    """Replies as scripted, then raises or never answers once the script runs out."""
+
+    def __init__(self, replies: list[LMOutput], then: BaseException | None = None) -> None:
+        super().__init__(replies)
+        self.then = then
+
+    async def agenerate(self, requests, sampling_params=None):
+        if not self.replies:
+            if self.then is not None:
+                raise self.then
+            await asyncio.sleep(60)
+        return await super().agenerate(requests, sampling_params)
+
+
+class StallingBinding(FakeBinding):
+    """Runs scripted commands, then hangs on the command numbered ``hang_at``."""
+
+    def __init__(self, hang_at: int) -> None:
+        super().__init__()
+        self.hang_at = hang_at
+
+    async def execute_in_session(self, command: str, timeout: float | None = None):
+        if len(self.commands) + 1 == self.hang_at:
+            await asyncio.sleep(60)
+        return await super().execute_in_session(command, timeout)
+
+
+@pytest.mark.anyio
+async def test_a_finished_run_leaves_its_own_trajectory_in_progress() -> None:
+    progress = RunProgress()
+    provider = ScriptedProvider([bash_reply("ls"), bash_reply(f"echo {SUBMIT_MARKER}")])
+
+    result, _ = await run(provider, progress=progress)
+
+    assert progress.final == result.metadata
+    assert progress.trajectory() == result.trajectory
+    assert "partial" not in progress.trajectory().metadata
+
+
+@pytest.mark.anyio
+async def test_a_run_that_raises_leaves_the_replies_it_got() -> None:
+    progress = RunProgress()
+    provider = StallingProvider([bash_reply("ls"), bash_reply("pwd")], then=RuntimeError("down"))
+
+    with pytest.raises(RuntimeError, match="down"):
+        await run(provider, progress=progress)
+
+    trajectory = progress.trajectory()
+    meta = trajectory.metadata
+    assert meta["partial"] is True
+    assert meta["in_flight_request"] is True
+    assert meta["steps"] == 2
+    assert [t["completion_tokens"] for t in meta["timing"]] == [5, 5]
+    assert meta["usage"]["completion_tokens"] == 10
+    assert [t["cmd"] for t in meta["timing"]] == ["ls", "pwd"]
+    assert len(trajectory.assistant_turns) == 2
+
+
+@pytest.mark.anyio
+async def test_a_run_cut_off_while_waiting_on_the_model_marks_the_request() -> None:
+    progress = RunProgress()
+    provider = StallingProvider([bash_reply("ls")])
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(run(provider, progress=progress), timeout=0.2)
+
+    meta = progress.trajectory().metadata
+    assert meta["in_flight_request"] is True
+    assert meta["steps"] == 1
+    assert [t["completion_tokens"] for t in meta["timing"]] == [5]
+
+
+@pytest.mark.anyio
+async def test_a_run_cut_off_mid_command_keeps_that_reply() -> None:
+    progress = RunProgress()
+    provider = ScriptedProvider([bash_reply("ls"), bash_reply("sleep 600")])
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            run(provider, binding=StallingBinding(hang_at=2), progress=progress), timeout=0.2
+        )
+
+    meta = progress.trajectory().metadata
+    assert meta["in_flight_request"] is False
+    assert meta["steps"] == 2
+    assert [t["completion_tokens"] for t in meta["timing"]] == [5, 5]
+    assert meta["timing"][1]["cmd"] == "sleep 600"
+    assert "bash_s" not in meta["timing"][1]
+    assert "bash_s" in meta["timing"][0]
 
 
 @pytest.mark.anyio

@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from olmo_eval.common.types import LMOutput, LMRequest, RequestType, SamplingParams
@@ -198,6 +198,47 @@ def parse_action(output: LMOutput) -> ParsedAction:
     return ParsedAction(kind=kind, command=command, tool_call=call)
 
 
+@dataclass
+class RunProgress:
+    """A run's record so far, for a caller that loses the run.
+
+    Pass one per run as ``run(..., progress=...)``; the scaffold fills it in
+    place as the run goes. A run that raises, or that a caller's timeout
+    cancels, returns nothing, so the caller logs :meth:`trajectory` instead.
+    Filling it changes nothing the run does.
+    """
+
+    turns: list[AgentTurn] = field(default_factory=list)
+    timing: list[dict[str, Any]] = field(default_factory=list)
+    usage: dict[str, int] = field(
+        default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0}
+    )
+    steps: int = 0
+    format_errors: int = 0
+    #: A model request was sent and no reply came back: it was cut off, or it raised.
+    in_flight: bool = False
+    #: The run's own metadata, set once it returns.
+    final: dict[str, Any] | None = None
+
+    def trajectory(self) -> AgentTrajectory:
+        """The trajectory as returned, or, for a run that never returned, what it did.
+
+        A partial trajectory's metadata says ``partial`` and whether a request
+        was in flight; its ``timing`` and ``usage`` cover the replies received.
+        """
+        if self.final is not None:
+            return AgentTrajectory(turns=tuple(self.turns), metadata=dict(self.final))
+        metadata = {
+            "partial": True,
+            "in_flight_request": self.in_flight,
+            "steps": self.steps,
+            "format_errors": self.format_errors,
+            "usage": dict(self.usage),
+            "timing": [dict(entry) for entry in self.timing],
+        }
+        return AgentTrajectory(turns=tuple(self.turns), metadata=metadata)
+
+
 @register_scaffold("vanillux")
 class VanilluxScaffold(Scaffold):
     """Drive a model through a task with one ``bash`` tool and the mini-swe-agent prompts.
@@ -209,6 +250,8 @@ class VanilluxScaffold(Scaffold):
       the run stops (default 64).
     - ``agent_timeout``: wall-clock budget for the whole run in seconds. When
       set, no new step starts past it and the last command is cut to fit.
+    - ``progress``: a :class:`RunProgress` the run fills as it goes, so a
+      caller can log a run that raises or that it cancels.
 
     ``HarnessConfig.max_turns`` bounds the number of steps (default 64). The
     config's tools must include a session-bound ``bash`` tool.
@@ -264,11 +307,8 @@ class VanilluxScaffold(Scaffold):
             {"role": "system", "content": config.system_prompt or SYSTEM_TEMPLATE},
             {"role": "user", "content": render_instance(instruction.strip())},
         ]
-        turns: list[AgentTurn] = []
-        timing: list[dict[str, Any]] = []
-        usage = {"prompt_tokens": 0, "completion_tokens": 0}
-        format_errors = 0
-        steps = 0
+        progress = options.get("progress") or RunProgress()
+        turns, timing, usage = progress.turns, progress.timing, progress.usage
         last_text = ""
         completion_reason = "max_steps"
         error: str | None = None
@@ -283,6 +323,7 @@ class VanilluxScaffold(Scaffold):
                     break
 
                 llm_started = time.monotonic()
+                progress.in_flight = True
                 outputs = await provider.agenerate(
                     [
                         LMRequest(
@@ -293,6 +334,7 @@ class VanilluxScaffold(Scaffold):
                     ],
                     params,
                 )
+                progress.in_flight = False
                 llm_seconds = time.monotonic() - llm_started
                 replies = outputs[0] if outputs else []
                 if is_context_overflow_output(replies):
@@ -306,23 +348,29 @@ class VanilluxScaffold(Scaffold):
                     break
 
                 output = replies[0]
-                steps += 1
+                progress.steps += 1
                 last_text = output.text or ""
                 self._accumulate_usage(output, usage)
+                reply = self._reply_record(output)
                 action = parse_action(output)
 
                 if action.kind == "no_tool_call":
-                    format_errors += 1
+                    progress.format_errors += 1
                     self._record_format_error(messages, turns, output, action)
                     timing.append(
-                        {"step": steps, "llm_s": round(llm_seconds, 1), "format_error": True}
+                        {
+                            "step": progress.steps,
+                            "llm_s": round(llm_seconds, 1),
+                            **reply,
+                            "format_error": True,
+                        }
                     )
-                    if format_errors >= max_format_errors:
+                    if progress.format_errors >= max_format_errors:
                         completion_reason = "format_errors"
                         break
                     continue
 
-                format_errors = 0
+                progress.format_errors = 0
                 call = action.tool_call
                 assert call is not None
                 messages.append(
@@ -330,6 +378,15 @@ class VanilluxScaffold(Scaffold):
                 )
                 turns.append(AgentTurn.assistant(content=last_text, tool_calls=[call]))
 
+                # The reply is logged before its command runs, so a run cut off
+                # mid-command still accounts for it.
+                entry: dict[str, Any] = {
+                    "step": progress.steps,
+                    "llm_s": round(llm_seconds, 1),
+                    **reply,
+                    "cmd": action.command[:200],
+                }
+                timing.append(entry)
                 timeout = command_timeout
                 if deadline is not None:
                     timeout = max(1.0, min(command_timeout, deadline - time.monotonic()))
@@ -350,15 +407,7 @@ class VanilluxScaffold(Scaffold):
                         ]
                     )
                 )
-                timing.append(
-                    {
-                        "step": steps,
-                        "llm_s": round(llm_seconds, 1),
-                        "bash_s": round(exec_seconds, 1),
-                        "exit_code": result.exit_code,
-                        "cmd": action.command[:200],
-                    }
-                )
+                entry.update(bash_s=round(exec_seconds, 1), exit_code=result.exit_code)
 
                 if action.kind == "done" or SUBMIT_MARKER in observation:
                     completion_reason = "submitted"
@@ -368,13 +417,16 @@ class VanilluxScaffold(Scaffold):
 
         metadata = {
             "completion_reason": completion_reason,
-            "steps": steps,
-            "format_errors": format_errors,
+            "steps": progress.steps,
+            "format_errors": progress.format_errors,
             "usage": dict(usage),
             "timing": timing,
             "duration_s": round(time.monotonic() - started, 1),
         }
-        logger.info("Task %s finished after %s steps: %s", task_id, steps, completion_reason)
+        progress.final = metadata
+        logger.info(
+            "Task %s finished after %s steps: %s", task_id, progress.steps, completion_reason
+        )
         final_output = LMOutput(text=last_text, metadata={"completion_reason": completion_reason})
         return HarnessResult(
             final_output=final_output,
@@ -383,6 +435,19 @@ class VanilluxScaffold(Scaffold):
             error=error,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _reply_record(output: LMOutput) -> dict[str, Any]:
+        """The reply's token count and finish reason as the provider gave them (None if absent).
+
+        Logged so that the share of replies cut at ``max_tokens`` can be counted per reply,
+        not inferred from the trial's total.
+        """
+        metadata = output.metadata or {}
+        return {
+            "completion_tokens": metadata.get("completion_tokens"),
+            "finish_reason": metadata.get("finish_reason"),
+        }
 
     @staticmethod
     def _record_format_error(
