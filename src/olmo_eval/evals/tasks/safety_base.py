@@ -36,6 +36,14 @@ base_sampling = SamplingParams(
     top_p=0.6,
     stop_sequences=("Question:", "</s>", "<|im_end|>", "\n\n"),
 )
+# base_sampling without the "\n\n" stop. That stop ends a response at its first
+# blank line, so the judge grades only the opening paragraph of a longer answer.
+base_multiparagraph_sampling = SamplingParams(
+    max_tokens=1024,
+    temperature=0.6,
+    top_p=0.6,
+    stop_sequences=("Question:", "</s>", "<|im_end|>"),
+)
 
 
 class SafetyBase(Task):
@@ -124,7 +132,7 @@ def register_safety_variants(
     judge_model: str = WILDGUARD_JUDGE_MODEL,
 ):
     """
-    Build the four variants that the base wildguard safety tasks use.
+    Build the variants that the base wildguard safety tasks use.
 
     ``macro_subsets`` makes the primary metric an unweighted mean over those
     subsets instead of an instance-weighted mean across the whole task.
@@ -186,6 +194,17 @@ def register_safety_variants(
         metrics=safety_metrics(scorer, subsets, macro_subsets),
         primary_metric=primary_metric(scorer),
         sampling_params=base_sampling,
+        formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
+        judge_model=judge_model,
+    )
+
+    # The base variant without the "\n\n" stop
+    register_variant(
+        eval_name,
+        "base_multiparagraph",
+        metrics=safety_metrics(scorer, subsets, macro_subsets),
+        primary_metric=primary_metric(scorer),
+        sampling_params=base_multiparagraph_sampling,
         formatter=CompletionFormatter(template="Question: {question}\nAnswer:"),
         judge_model=judge_model,
     )

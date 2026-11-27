@@ -127,3 +127,15 @@ make_suite(
     aggregation=AggregationStrategy.AVERAGE,
     description="Safety evals for pretrained models",
 )
+
+# safety_base with the "\n\n" stop removed
+make_suite(
+    "safety_base:v2",
+    (
+        *(f"{task}:base_multiparagraph" for task in SAFETY_TASKS),
+        *(f"{task}:base" for task in MCQ_TASKS),
+        "strongreject:base_multiparagraph",
+    ),
+    aggregation=AggregationStrategy.AVERAGE,
+    description="Safety evals for pretrained models, without the blank-line stop",
+)
