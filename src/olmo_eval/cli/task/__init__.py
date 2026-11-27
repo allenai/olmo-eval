@@ -27,6 +27,11 @@ def task() -> None:
 @click.option("--skip", "-s", default=0, type=int, help="Number of instances to skip")
 @click.option("--instance", is_flag=True, help="Show instance details")
 @click.option("--request", is_flag=True, help="Show the LM request")
+@click.option(
+    "--config",
+    is_flag=True,
+    help="Show how the spec resolves: task class, variants in order, metrics and primary",
+)
 @click.option("--tokenizer", "-T", help="Tokenizer to use for formatting/tokenization")
 @click.option(
     "--formatted", is_flag=True, help="Show prompt after template applied (requires --tokenizer)"
@@ -49,6 +54,7 @@ def inspect(
     skip: int,
     instance: bool,
     request: bool,
+    config: bool,
     tokenizer: str | None,
     formatted: bool,
     tokens: bool,
@@ -65,16 +71,19 @@ def inspect(
         olmo-eval task inspect arc_easy
         olmo-eval task inspect arc_easy -n 3
         olmo-eval task inspect arc_easy:mc --request
+        olmo-eval task inspect mbpp:olmo3base:bpb --config
         olmo-eval task inspect arc_easy --json
         olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --formatted
         olmo-eval task inspect humaneval -T meta-llama/Llama-3.1-8B-Instruct --tokens
     """
     from olmo_eval.common.inspection import (
+        describe_task_spec,
         format_with_chat_template,
         formatted_request_to_dict,
         inspect_formatted_request,
         inspect_instance,
         inspect_request,
+        inspect_task_config,
         inspect_tokens,
         instance_to_dict,
         load_tokenizer,
@@ -88,7 +97,7 @@ def inspect(
         raise SystemExit(1)
 
     # Default to showing instance if no display flags specified
-    show_instance = instance or not (request or formatted or tokens)
+    show_instance = instance or not (request or formatted or tokens or config)
 
     # Validate task exists
     base_name = get_base_task_name(task_spec)
@@ -107,9 +116,19 @@ def inspect(
 
     try:
         task_obj = get_task(task_spec)
-    except ValueError as e:
+    except (KeyError, ValueError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise SystemExit(1) from None
+
+    if config:
+        description = describe_task_spec(task_spec)
+        if as_json:
+            # --config --json prints the resolution alone.
+            print(json.dumps(description, indent=2, default=str))
+            return
+        inspect_task_config(description, console=console)
+        if not (show_instance or request or formatted or tokens):
+            return
 
     # Load tokenizer if needed
     tokenizer_obj = None

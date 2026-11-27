@@ -381,6 +381,85 @@ def inspect_request(
     console.print(Panel(Group(*renderables), title=panel_title, border_style="magenta"))
 
 
+def metric_key(metric: Any) -> str:
+    """The ``metric:scorer`` key under which the runner records ``metric``'s value."""
+    scorer = getattr(metric, "scorer", None)
+    scorer_name = scorer().name if scorer is not None else "default"
+    return f"{metric.name}:{scorer_name}"
+
+
+def describe_task_spec(spec: str) -> dict[str, Any]:
+    """Describe how ``spec`` resolves, without loading its data.
+
+    Returns the registered task and class, the variants in the order they apply with
+    the config fields each one sets, the metric keys the task computes, the primary
+    metric key the runner records for it, and whether that primary is among the
+    computed metrics. A primary that is not computed never yields a primary score, so
+    the task drops out of suite averages and uploads without a score.
+    """
+    from olmo_eval.evals.tasks.common import get_task, resolve_task_spec
+    from olmo_eval.runners.processing.utils import get_metric_metadata
+
+    resolved = resolve_task_spec(spec)
+    task = get_task(spec)
+    computed = [metric_key(metric) for metric in task.config.metrics]
+    primary = get_metric_metadata(task)
+    return {
+        "spec": spec,
+        "task": resolved.task_name,
+        "task_class": f"{type(task).__module__}.{type(task).__qualname__}",
+        "variants": [
+            {"name": name, "sets": sorted(overrides)}
+            for name, overrides in zip(resolved.variants, resolved.overrides, strict=True)
+        ],
+        "metrics": computed,
+        "primary_metric": primary,
+        "primary_metric_computed": (primary in computed) if primary is not None else None,
+        "config": task.config.to_dict(),
+    }
+
+
+def inspect_task_config(description: dict[str, Any], *, console: Console | None = None) -> None:
+    """Print a ``describe_task_spec`` result as a Rich panel."""
+    if console is None:
+        console = shared_console
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("task", description["task"])
+    table.add_row("class", description["task_class"])
+    if description["variants"]:
+        lines = []
+        for variant in description["variants"]:
+            sets = ", ".join(variant["sets"]) if variant["sets"] else "nothing"
+            lines.append(f"{variant['name']}  [dim]sets {sets}[/dim]")
+        table.add_row("variants", "\n".join(lines))
+    else:
+        table.add_row("variants", "[dim]none[/dim]")
+
+    config = description["config"]
+    for field in ("formatter", "num_fewshot", "fewshot_source", "split", "limit"):
+        value = config.get(field)
+        if isinstance(value, dict):
+            value = value.get("type") or value.get("path") or value
+        table.add_row(field, format_value(value))
+    table.add_row("metrics", "\n".join(description["metrics"]) or "[dim]none[/dim]")
+
+    primary = description["primary_metric"]
+    if primary is None:
+        table.add_row("primary", "[dim]none designated[/dim]")
+    elif description["primary_metric_computed"]:
+        table.add_row("primary", primary)
+    else:
+        table.add_row(
+            "primary", f"{primary}  [red]not computed by this spec: no primary score[/red]"
+        )
+
+    console.print(Panel(table, title=f"[bold]{description['spec']}[/bold]", border_style="cyan"))
+
+
 def instance_to_dict(instance: Instance) -> dict[str, Any]:
     """Convert an Instance to a JSON-serializable dictionary.
 

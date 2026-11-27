@@ -11,8 +11,9 @@ Examples:
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Any, TypeVar
 
 from olmo_eval.common.scorers.llm_judge import judge_env_overrides
@@ -300,6 +301,60 @@ def get_base_task_name(spec: str) -> str:
     return base
 
 
+@dataclass(frozen=True)
+class ResolvedSpec:
+    """A task spec split into its registered task and the variants applied to it.
+
+    Attributes:
+        task_name: The registered task, which may itself contain colons.
+        variants: The variant names after it, in the order they are applied.
+        overrides: Each variant's ``TaskConfig`` field overrides, in the same order.
+    """
+
+    task_name: str
+    variants: tuple[str, ...]
+    overrides: tuple[Mapping[str, Any], ...]
+
+
+def resolve_task_spec(spec: str) -> ResolvedSpec:
+    """Split ``spec`` into its registered task and the variants applied to it.
+
+    Task names may contain colons, so the longest registered prefix is the task and
+    the remaining segments are its variants. Variants apply left to right, and a field
+    that two of them set takes the later one's value. ``mbpp:olmo3base:bpb`` is the
+    task ``mbpp:olmo3base`` with the ``bpb`` variant; ``mbpp:bpb:olmo3base`` is the
+    task ``mbpp:bpb`` with the ``olmo3base`` variant.
+
+    Raises:
+        KeyError: If no registered task matches, or a variant is not registered for it.
+    """
+    parts = spec.split(":")
+    task_name = parts[0]
+    variants = parts[1:]
+    for i in range(len(parts), 0, -1):
+        candidate = ":".join(parts[:i])
+        if candidate in _tasks:
+            task_name, variants = candidate, parts[i:]
+            break
+
+    if task_name not in _tasks:
+        available = ", ".join(sorted(_tasks.keys()))
+        raise KeyError(f"Unknown task '{task_name}'. Available: {available}")
+
+    registered = _variants.get(task_name, {})
+    overrides: list[Mapping[str, Any]] = []
+    for variant in variants:
+        if not variant or variant not in registered:
+            available_variants = ", ".join(sorted(registered)) if registered else "none"
+            raise KeyError(
+                f"Unknown variant '{variant}' for task '{task_name}'. "
+                f"Available: {available_variants}"
+            )
+        overrides.append(MappingProxyType(registered[variant]))
+
+    return ResolvedSpec(task_name, tuple(variants), tuple(overrides))
+
+
 def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     """Instantiate a task by spec.
 
@@ -318,43 +373,11 @@ def get_task(spec: str, config_overrides: dict[str, Any] | None = None) -> Task:
     Raises:
         KeyError: If task_name is not registered.
     """
-    # Try progressively shorter prefixes to find a registered task with colons in its name
-    # e.g., for "humaneval:bpb:mc", check "humaneval:bpb:mc", then "humaneval:bpb", then "humaneval"
-    parts = spec.split(":")
-    task_name = None
-    variants: list[str] = []
-
-    for i in range(len(parts), 0, -1):
-        candidate = ":".join(parts[:i])
-        if candidate in _tasks:
-            task_name = candidate
-            variants = parts[i:]
-            break
-
-    if task_name is None:
-        # Fall back to original parsing (first part is task name)
-        task_name = parts[0]
-        variants = parts[1:] if len(parts) > 1 else []
-
-    if task_name not in _tasks:
-        available = ", ".join(sorted(_tasks.keys()))
-        raise KeyError(f"Unknown task '{task_name}'. Available: {available}")
-
+    resolved = resolve_task_spec(spec)
+    task_name = resolved.task_name
     config = _configs[task_name]
-
-    def _resolve_error(name: str) -> KeyError:
-        available_variants = list(_variants.get(task_name, {}).keys())
-        return KeyError(
-            f"Unknown variant '{name}' for task '{task_name}'. "
-            f"Available: {', '.join(sorted(available_variants)) if available_variants else 'none'}"
-        )
-
-    for variant in variants:
-        if not variant:
-            raise _resolve_error(variant)
-        if task_name not in _variants or variant not in _variants[task_name]:
-            raise _resolve_error(variant)
-        config = replace(config, **_variants[task_name][variant])
+    for overrides in resolved.overrides:
+        config = replace(config, **overrides)
 
     # A judged task takes its judge from $OLMO_EVAL_JUDGE unless the overrides name a
     # judge model, which then wins with its task's default effort and budget.
