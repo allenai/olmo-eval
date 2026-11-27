@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import multiprocessing as mp
 import queue
 import time
@@ -11,7 +12,8 @@ from olmo_eval.runners.asynq.types import WORKER_FATAL
 
 logger = get_logger(__name__)
 
-DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = 900.0
+# Large checkpoints (e.g. a 146 GB export read by 8 workers) can take longer than 15 minutes to load.
+DEFAULT_PROVIDER_INIT_TIMEOUT_SECONDS = float(os.environ.get("OLMO_EVAL_PROVIDER_INIT_TIMEOUT") or 900.0)
 
 
 def terminate_workers(
