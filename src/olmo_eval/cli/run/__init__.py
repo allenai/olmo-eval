@@ -30,7 +30,12 @@ from olmo_eval.cli.utils import (
     process_ordered_args,
     reconstruct_ordered_args,
 )
-from olmo_eval.common.shutdown import Terminated, clear_shutdown, request_shutdown
+from olmo_eval.common.shutdown import (
+    Terminated,
+    clear_shutdown,
+    force_exit_after,
+    request_shutdown,
+)
 
 
 @contextlib.contextmanager
@@ -260,7 +265,9 @@ def run(
                 mark_run_failed(
                     runner.output_dir, upload_config, error=f"Run {reason}", since=started
                 )
-            raise SystemExit(143 if isinstance(e, Terminated) else 130) from None
+            code = 143 if isinstance(e, Terminated) else 130
+            force_exit_after(code)
+            raise SystemExit(code) from None
         except ProgressLockedError as e:
             # Another run owns this directory's manifest and run: report nothing for it.
             console.print(f"\n[bold red]Not started:[/bold red] {e}")
@@ -269,4 +276,5 @@ def run(
             console.print(f"\n[bold red]Evaluation failed:[/bold red] {e}")
             console.print_exception()
             mark_run_failed(runner.output_dir, upload_config, error=str(e), since=started)
+            force_exit_after(1)
             raise SystemExit(1) from None
