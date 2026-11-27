@@ -96,6 +96,11 @@ class SandboxConfig:
         image_pull: Image pull policy for swerex ("never", "missing", "always").
             Use "never" when inject_swerex=True to skip redundant image checks.
         registry_auth: Authentication for private container registries (Modal only).
+        retry_delivered_commands: Retry an HTTP command on any transport failure,
+            including one the sandbox may already have received, and report a command
+            that outlives its client deadline on every attempt as timed out. Only for
+            commands that are safe to run twice, such as code scoring in a fresh
+            temporary directory.
     """
 
     image: str
@@ -124,6 +129,7 @@ class SandboxConfig:
     dockerfile_extra: tuple[str, ...] = ()
     image_pull: ImagePullPolicy | None = None
     registry_auth: RegistryAuth | None = None
+    retry_delivered_commands: bool = False
 
     @property
     def is_local(self) -> bool:
