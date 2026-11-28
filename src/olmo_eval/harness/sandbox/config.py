@@ -196,4 +196,5 @@ class SandboxConfig:
             dockerfile_extra=tuple(data.get("dockerfile_extra", [])),
             image_pull=data.get("image_pull"),
             registry_auth=registry_auth,
+            retry_delivered_commands=data.get("retry_delivered_commands", False),
         )
