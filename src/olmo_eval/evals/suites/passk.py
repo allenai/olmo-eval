@@ -1,6 +1,6 @@
 """OLMoBase math and code suites at 256 samples per problem, for pass@k curves.
 
-Each leaf task of `olmobase:math:v3` and `olmobase:code:v3` gets an `n256` variant that
+Each leaf task of `olmobase:math:v3`, `olmobase:code:v3` and `olmobase:code:v4` gets an `n256` variant that
 draws 256 samples and reports pass@k for k = 1, 2, 4, ..., 256 with the scorer its
 pass@k metrics already use. Prompts, sampling temperature, top-p, token budgets and the
 primary metric are unchanged, so pass@1 estimates the same quantity as the base suites.
@@ -65,5 +65,5 @@ def _mirror(suite: Suite) -> Suite:
     )
 
 
-for _name in ("olmobase:math:v3", "olmobase:code:v3"):
+for _name in ("olmobase:math:v3", "olmobase:code:v3", "olmobase:code:v4"):
     register(_mirror(get_suite(_name)))
