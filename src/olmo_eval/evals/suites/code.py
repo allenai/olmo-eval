@@ -271,6 +271,19 @@ register(
     )
 )
 
+# olmobase:code:v3 with LeetCode prompts that end at the newline (deepseek_leetcode v4).
+register(
+    Suite(
+        name="olmobase:code:v4",
+        tasks=tuple(
+            "deepseek_leetcode:olmo3base:v4" if task == "deepseek_leetcode:olmo3base:v3" else task
+            for task in get_suite("olmobase:code:v3").tasks
+        ),
+        aggregation=AggregationStrategy.AVERAGE_OF_AVERAGES,
+        description="OLMoBase code generation evaluation suite (v4)",
+    )
+)
+
 make_suite(
     "olmobase:code_fim",
     (
