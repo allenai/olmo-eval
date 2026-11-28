@@ -147,3 +147,21 @@ class DeepSeekLeetCodeOlmo3BaseV3(DeepSeekLeetCodeOlmo3BaseV2):
             for output in response.outputs:
                 if output.extracted_answer is not None:
                     output.extracted_answer = self.IMPORT_HEADER + output.extracted_answer
+
+
+@register("deepseek_leetcode:olmo3base:v4")
+class DeepSeekLeetCodeOlmo3BaseV4(DeepSeekLeetCodeOlmo3BaseV3):
+    """v3 with the prompt ending at the newline after the method signature.
+
+    The dataset's `prompt` ends in the body's indentation (8 spaces), so the model continues
+    from bare whitespace. Depending on the tokenizer it then stops at once (empty output) or
+    writes its usual leading space, indenting the first line by 9 and failing with an
+    IndentationError. HumanEval's prompts end at the newline, and DeepSeek-Coder's harness,
+    for a completion that continues the code, joins the stripped signature, a newline and
+    the model's own indented body; v4 does the same by dropping the trailing spaces and tabs.
+    """
+
+    task_settings = {"import_header": "deepseek_coder", "prompt_trailing_whitespace": "stripped"}
+
+    def process_doc(self, doc: dict[str, Any], index: int = 0) -> Instance:
+        return super().process_doc({**doc, "prompt": doc["prompt"].rstrip(" \t")}, index)
