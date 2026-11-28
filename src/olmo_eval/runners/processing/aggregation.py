@@ -320,6 +320,7 @@ def compute_suite_aggregations(
       the task's instance count
     - AVERAGE_OF_AVERAGES: Average over children, where nested suites are
       averaged first (each child gets equal weight)
+    - DISPLAY_ONLY: Report the suite and its task membership without a suite score
     - GAP: Both tasks' primary scores and the companion minus the reference
     - NONE: No aggregate for the suite itself; each nested suite reports its own
 
@@ -387,11 +388,12 @@ def _aggregate_suites(
             ).items():
                 suite_aggregations.setdefault(key, result)
 
-        if report_descendants and suite.aggregation == AggregationStrategy.DISPLAY_ONLY:
+        if suite.aggregation == AggregationStrategy.DISPLAY_ONLY:
+            display_tasks = [f"{name}{priority_suffix}" for name in suite.expand()]
             suite_aggregations[spec] = {
                 "metrics": {},
-                "tasks": [f"{name}{priority_suffix}" for name in suite.expand()],
-                "num_tasks": len(suite.expand()),
+                "tasks": display_tasks,
+                "num_tasks": len(display_tasks),
                 "aggregation": suite.aggregation.value,
             }
             continue
@@ -451,13 +453,10 @@ def _aggregate_suites(
                     existing = suite_aggregations.get(result.nested_suite_key)
                     if existing is not None:
                         nested_result = {**existing, "parent_suite": spec}
-                    unscored_child = (
-                        result.nested_suite.aggregation == AggregationStrategy.NONE
-                        or (
-                            report_descendants
-                            and result.nested_suite.aggregation == AggregationStrategy.DISPLAY_ONLY
-                        )
-                    )
+                    unscored_child = result.nested_suite.aggregation in {
+                        AggregationStrategy.NONE,
+                        AggregationStrategy.DISPLAY_ONLY,
+                    }
                     if unscored_child:
                         nested_result["metrics"] = {}
                     elif existing is None and result.primary_score is not None:
@@ -495,7 +494,7 @@ def _aggregate_suites(
             _attach_generation_counts(suite_result, task_results, all_tasks_included)
             suite_aggregations[spec] = suite_result
         else:
-            # AVERAGE, WEIGHTED_AVERAGE or DISPLAY_ONLY: average all expanded
+            # AVERAGE or WEIGHTED_AVERAGE: average all expanded
             # tasks, weighting each by its instance count for WEIGHTED_AVERAGE.
             weighted = suite.aggregation == AggregationStrategy.WEIGHTED_AVERAGE
             suite_specs = [f"{task_spec}{priority_suffix}" for task_spec in suite.expand()]
