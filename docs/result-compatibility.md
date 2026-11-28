@@ -16,6 +16,18 @@ Add an entry in the PR that makes the change, newest first. Each entry states:
 - **Comparability**: which earlier results remain comparable and what replaces the old
   behavior, if anything.
 
+## 2026-11-28 — Display-only suite reports omit synthetic averages (#481)
+
+- **Affected** — Console and `metrics.json` summaries for `DISPLAY_ONLY` suites,
+  including BFCL, OCR, CTC, Molmo2 and science suites. Suites under a `NONE`
+  container already omitted their headline score.
+- **Change** — Display-only suites report task membership without their own score.
+  Per-task scores and scores of averaging parents retain their existing meaning.
+- **Identity** — Task hashes and suite definitions are unchanged.
+- **Comparability** — Historical per-task scores remain comparable. When consuming
+  archived results, omit any `primary_score:average` headline attached to a
+  display-only suite. Dashboard ingest already emits a null score for those suites.
+
 ## 2026-11-25: Add base model safety suite variant without the \n\n stopping condition (#583)
 - **Affected**: all tasks and variants that use the safety implementation of the llm as a judge
 - **Change**: responses with only whitespace characters count as empty and score 0 instead of relying
